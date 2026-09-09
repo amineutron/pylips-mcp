@@ -162,9 +162,11 @@ def load_config() -> dict:
         except Exception as e:
             print(f"Warning: Could not load config.yaml: {e}", file=sys.stderr)
 
-    # Surcharger avec secrets.yaml si present (credentials ne sont pas dans config.yaml)
-    secrets_path = config_path.parent / "secrets.yaml"
-    if secrets_path.exists():
+    # Surcharger avec secrets.yaml si present a cote du config.yaml retenu (les identifiants
+    # ne sont pas dans config.yaml). Sans fichier de config (tout vient de l'environnement),
+    # il n'y a rien a lire.
+    secrets_path = config_path.parent / "secrets.yaml" if config_path is not None else None
+    if secrets_path is not None and secrets_path.exists():
         try:
             import yaml
             with open(secrets_path) as f:
