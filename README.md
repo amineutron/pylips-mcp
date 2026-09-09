@@ -1,6 +1,6 @@
 # pylips-mcp
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![tests](https://github.com/amineutron/pylips-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/amineutron/pylips-mcp/actions/workflows/tests.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 
 MCP server for controlling Philips Android TV via the JointSpace API and ADB.
 
@@ -9,22 +9,26 @@ Handles the TP Vision SHA1 certificate chain transparently.
 
 ## Tools
 
-| Tool | Description |
-|------|-------------|
-| `set_wake` | Power on the TV |
-| `set_standby` | Put TV in standby |
-| `set_screen_off` | Turn off screen while keeping audio (HDMI source only) |
-| `set_screen_on` | Turn screen back on after screen_off |
-| `set_volume` | Set volume to a specific level |
-| `get_volume` | Get current volume |
-| `set_ambilight` | Enable/configure Ambilight |
-| `get_ambilight_status` | Get Ambilight state |
-| `launch_app` | Launch an app by name |
-| `get_current_app` | Get currently running app |
-| `launch_app` (YouTube) | Launch YouTube with a specific video (ADB deep link) |
-| `get_tv_status` | Get TV power state |
-| `send_key` | Send a remote control keypress |
-| `dismiss_screensaver` | Dismiss active screensaver |
+<!-- tools:start -->
+| Outil | Rôle |
+|---|---|
+| `power_on` | Allume la TV Philips |
+| `power_off` | Eteint la TV Philips (standby) |
+| `screen_off` | Eteint l'ecran de la TV tout en gardant le son actif (mode musique). Note: fonctionne principalement en source HDMI/TV, limite en mode Android. |
+| `screen_on` | Rallume l'ecran de la TV apres un screen_off |
+| `volume_up` | Augmente le volume de la TV (default +5) |
+| `volume_down` | Baisse le volume de la TV (default -5) |
+| `volume_set` | Regle le volume a un niveau specifique |
+| `mute` | Coupe ou remet le son de la TV |
+| `ambilight_on` | Active l'Ambilight de la TV |
+| `ambilight_off` | Desactive l'Ambilight de la TV |
+| `ambilight_mode` | Change le mode Ambilight |
+| `list_apps` | Liste les applications disponibles sur la TV |
+| `launch_app` | Lance une application sur la TV |
+| `youtube_video` | Lance YouTube sur une video specifique (URL youtube ou ID de video) |
+| `get_state` | Retourne l'etat actuel de la TV (allumee/standby) |
+| `send_key` | Envoie une touche de telecommande |
+<!-- tools:end -->
 
 ## Requirements
 

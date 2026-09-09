@@ -108,9 +108,10 @@ def _build_tv_session():
 
     return session
 
-# Ajouter pylips au path
-PYLIPS_PATH = os.environ.get("PYLIPS_PATH", "/home/amineutron/dev/pylips")
-if os.path.exists(PYLIPS_PATH):
+# Bibliotheque pylips (https://github.com/eslavnov/pylips) : soit installee dans l'environnement,
+# soit un clone local indique par PYLIPS_PATH. Aucun chemin par defaut.
+PYLIPS_PATH = os.environ.get("PYLIPS_PATH", "")
+if PYLIPS_PATH and os.path.isdir(PYLIPS_PATH):
     sys.path.insert(0, PYLIPS_PATH)
 
 try:
@@ -136,9 +137,13 @@ def load_config() -> dict:
         }
     }
 
-    # Essayer de charger depuis config.yaml de Lyra
-    config_path = Path(__file__).parent.parent.parent / "config.yaml"
-    if config_path.exists():
+    # Ordre de resolution : variables d'environnement, puis YAML (PYLIPS_CONFIG, ./config.yaml,
+    # config.yaml a cote du serveur, ou celui de Lyra si le serveur vit dans son arborescence).
+    candidates = [Path(p) for p in (os.environ.get("PYLIPS_CONFIG", ""),) if p]
+    candidates += [Path.cwd() / "config.yaml", Path(__file__).parent / "config.yaml",
+                   Path(__file__).parent.parent.parent / "config.yaml"]
+    config_path = next((c for c in candidates if c.exists()), None)
+    if config_path is not None and not config["tv"]["host"]:
         try:
             import yaml
             with open(config_path) as f:
@@ -1016,3 +1021,9 @@ if __name__ == "__main__":
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     asyncio.run(main())
+
+
+def cli() -> None:
+    """Point d'entree console (pip/uvx) : lance le serveur MCP sur stdio."""
+    import asyncio as _asyncio
+    _asyncio.run(main())
