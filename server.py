@@ -116,7 +116,7 @@ if PYLIPS_PATH and os.path.isdir(PYLIPS_PATH):
 try:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
-    from mcp.types import Tool, TextContent
+    from mcp.types import TextContent, Tool
 except ImportError:
     print("Error: mcp package not installed. Run: pip install mcp", file=sys.stderr)
     sys.exit(1)
@@ -258,8 +258,8 @@ class PhilipsTVController:
 
         connect_timeout: timeout de connexion TCP seul (plus court que le read timeout).
         """
-        from requests.auth import HTTPDigestAuth
         import requests
+        from requests.auth import HTTPDigestAuth
 
         url = f"https://{self.host}:1926/6/{endpoint}"
         auth = HTTPDigestAuth(self.user, self.password)
@@ -347,9 +347,10 @@ class PhilipsTVController:
 
         Retourne True si l'envoi a reussi (sans garantie d'effet visible).
         """
+        import os
+
         from adb_shell.adb_device import AdbDeviceTcp
         from adb_shell.auth.sign_pythonrsa import PythonRSASigner
-        import os
 
         key_path = os.path.expanduser("~/.android/adbkey")
         if not os.path.exists(key_path):
@@ -653,8 +654,8 @@ class PhilipsTVController:
 
     def youtube_video(self, video: str) -> str:
         """Lance YouTube sur une video specifique via ADB (utilise le compte connecte)."""
-        import subprocess
         import re
+        import subprocess
 
         # Chemin ADB (telecharge depuis Google)
         adb_path = "/tmp/platform-tools/adb"
@@ -715,9 +716,9 @@ class PhilipsTVController:
 
     def _youtube_video_catt(self, video: str) -> str:
         """Fallback: Lance YouTube via Cast (catt) - sans compte Premium."""
-        import subprocess
         import re
         import shutil
+        import subprocess
 
         catt_path = shutil.which("catt") or os.path.expanduser("~/.local/bin/catt")
         if not os.path.exists(catt_path):
