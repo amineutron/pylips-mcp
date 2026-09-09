@@ -7,6 +7,12 @@ MCP server for controlling Philips Android TV via the JointSpace API and ADB.
 Exposes 14 tools covering power, volume, ambilight, app launching, and YouTube playback.
 Handles the TP Vision SHA1 certificate chain transparently.
 
+## Demo
+
+![MCP client: the 16 tools, then get_state on the real TV](docs/assets/demo.gif)
+
+Recorded against the real TV with [`docs/demo/record.sh`](docs/demo/record.sh): a minimal MCP client ([`docs/demo/mcp_demo.py`](docs/demo/mcp_demo.py)) starts the server over stdio with `TV_HOST`/`TV_USER`/`TV_PASS` in the environment, lists the tools and calls `get_state` (read-only). Credentials never appear on screen.
+
 ## Tools
 
 <!-- tools:start -->
