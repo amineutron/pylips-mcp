@@ -123,3 +123,16 @@ extracted from a TV with `openssl s_client -showcerts`. It contains no secret.
 ## License
 
 MIT
+
+## Part of the Lyra ecosystem
+
+| Dépôt | Rôle |
+|---|---|
+| [lyra](https://github.com/amineutron/lyra) | assistant DevOps vocal, local par défaut (AGPL-3.0) |
+| [fedora-agents](https://github.com/amineutron/fedora-agents) | MCP : machines virtuelles KVM et sauvegardes |
+| [mcp-tracking](https://github.com/amineutron/mcp-tracking) | MCP + API + tableau de bord des tâches longues |
+| [neutroncore](https://github.com/amineutron/neutroncore) | hub PWA du homelab |
+| [hue-mcp](https://github.com/amineutron/hue-mcp) | MCP Philips Hue (fork de ThomasRohde/hue-mcp) |
+| [pylips-mcp](https://github.com/amineutron/pylips-mcp) | MCP TV Philips |
+| [denon-mcp](https://github.com/amineutron/denon-mcp) | MCP ampli Denon |
+| [catt-mcp](https://github.com/amineutron/catt-mcp) | MCP Chromecast et DLNA |
