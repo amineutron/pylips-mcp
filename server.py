@@ -24,51 +24,87 @@ from pathlib import Path
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# Adaptateur SSL pour la TV Philips (certificats TP Vision SHA1 auto-signés)
+# TLS vers la TV Philips : epinglage par empreinte (certificate pinning)
 #
-# Contexte technique: les firmwares Philips embarquent une chaîne PKI TP Vision
-# datant de 2015, signée en SHA1. OpenSSL >= 1.1 rejette SHA1 par défaut
-# (SECLEVEL >= 1). On ne peut pas obtenir un certificat Let's Encrypt pour
-# l'IP locale d'une TV — verify=False est unavoidable pour la TV.
+# Les firmwares Philips embarquent une chaine PKI TP Vision de 2015 signee en
+# SHA1. OpenSSL 3 (et la politique crypto de Fedora/RHEL) refuse ces
+# signatures : la verification classique par autorite echoue, meme avec le
+# bundle tpvision_ca.pem et SECLEVEL=0. Un certificat Let's Encrypt est
+# impossible pour l'IP locale d'une TV.
 #
-# Amélioration vs verify=False pur:
-#   - On épingle explicitement le CA TP Vision (tpvision_ca.pem)
-#   - SECLEVEL=0 permet SHA1 sans désactiver toute la validation
-#   - check_hostname=False car le CN est "restfultv.tpvision.com" (pas l'IP)
-#   - Si le bundle est absent, fallback silencieux vers verify=False
+# Ce que fait ce module :
+#   - la verification par autorite est desactivee (CERT_NONE) car impossible ;
+#   - a la place, l'empreinte SHA-256 du certificat presente par la TV doit
+#     etre EGALE a celle du certificat feuille embarque dans tpvision_ca.pem
+#     (verification faite par urllib3 via assert_fingerprint, apres la poignee
+#     de main TLS : un intermediaire ne peut pas presenter ce certificat sans
+#     sa cle privee) ;
+#   - PYLIPS_TLS_FINGERPRINT=<sha256 hex> permet d'epingler une autre TV ;
+#   - PYLIPS_TLS_PIN=0 desactive l'epinglage (un avertissement est journalise).
 # ---------------------------------------------------------------------------
 
 _TPVISION_CERT_BUNDLE = Path(__file__).parent / "tpvision_ca.pem"
+_TLS_WARNED = False
+
+
+def bundle_leaf_fingerprint() -> str | None:
+    """Empreinte SHA-256 (hex) du premier certificat du bundle TP Vision.
+
+    Ce premier certificat est le certificat feuille (CN restfultv.tpvision.com)
+    que presentent les TV Philips JointSpace ; None si le bundle est absent.
+    """
+    import hashlib
+    try:
+        pem = _TPVISION_CERT_BUNDLE.read_text()
+        end = "-----END CERTIFICATE-----"
+        first = pem.split(end)[0] + end + "\n"
+        der = ssl.PEM_cert_to_DER_cert(first)
+        return hashlib.sha256(der).hexdigest()
+    except (OSError, ValueError):
+        return None
+
+
+def expected_tv_fingerprint() -> str | None:
+    """Empreinte a exiger : variable PYLIPS_TLS_FINGERPRINT, sinon le bundle, sinon None."""
+    if os.environ.get("PYLIPS_TLS_PIN", "1") == "0":
+        return None
+    override = os.environ.get("PYLIPS_TLS_FINGERPRINT", "").replace(":", "").strip().lower()
+    return override or bundle_leaf_fingerprint()
 
 
 def _build_tv_session():
-    """Retourne une requests.Session configurée pour la TV Philips."""
+    """Retourne une requests.Session dont les connexions HTTPS vers la TV sont epinglees."""
+    global _TLS_WARNED
     import requests
     from requests.adapters import HTTPAdapter
 
     session = requests.Session()
+    fingerprint = expected_tv_fingerprint()
+    if fingerprint is None and not _TLS_WARNED:
+        _TLS_WARNED = True
+        print("pylips-mcp: TLS pinning disabled (no fingerprint): the TV certificate is NOT verified",
+              file=sys.stderr)
 
     try:
         from urllib3.util.ssl_ import create_urllib3_context
 
-        _bundle = _TPVISION_CERT_BUNDLE
-
         class _TPVisionAdapter(HTTPAdapter):
             def init_poolmanager(self, *args, **kwargs):
                 ctx = create_urllib3_context()
-                ctx.set_ciphers("DEFAULT@SECLEVEL=0")
-                ctx.check_hostname = False
-                if _bundle.exists():
-                    ctx.load_verify_locations(str(_bundle))
-                    ctx.verify_mode = ssl.CERT_REQUIRED
-                else:
-                    ctx.verify_mode = ssl.CERT_NONE
+                ctx.set_ciphers("DEFAULT@SECLEVEL=0")  # chaine SHA1 de 2015
+                ctx.check_hostname = False              # le CN n'est pas l'IP de la TV
+                ctx.verify_mode = ssl.CERT_NONE         # la verification par CA est impossible (SHA1)
                 kwargs["ssl_context"] = ctx
+                if fingerprint:
+                    kwargs["assert_fingerprint"] = fingerprint  # verifie apres la poignee de main
                 return super().init_poolmanager(*args, **kwargs)
 
         session.mount("https://", _TPVisionAdapter())
-    except Exception:
-        pass  # urllib3 manquant ou version incompatible, session basique
+    except Exception as exc:  # urllib3 manquant ou incompatible : pas d'epinglage possible
+        if not _TLS_WARNED:
+            _TLS_WARNED = True
+            print(f"pylips-mcp: TLS pinning unavailable ({exc}): the TV certificate is NOT verified",
+                  file=sys.stderr)
 
     return session
 
@@ -225,6 +261,9 @@ class PhilipsTVController:
         t = (connect_timeout if connect_timeout else timeout, timeout)
 
         try:
+            # verify=False desactive seulement la verification par autorite de requests
+            # (impossible : chaine SHA1). L'authenticite est garantie par l'empreinte
+            # epinglee dans l'adaptateur HTTPS de la session (voir _build_tv_session).
             if method == "GET":
                 response = self._session.get(url, auth=auth, verify=False, timeout=t)
             else:
