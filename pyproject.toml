@@ -3,7 +3,7 @@ name = "pylips-mcp"
 version = "0.1.0"
 description = "MCP server for Philips TV control (JointSpace API + ADB)"
 readme = "README.md"
-authors = [{ name = "marouabah" }]
+authors = [{ name = "amineutron" }]
 license = { text = "MIT" }
 requires-python = ">=3.10"
 dependencies = [
@@ -17,7 +17,9 @@ dependencies = [
 adb = ["adb-shell>=0.4.0"]
 
 [project.urls]
-Repository = "https://github.com/marouabah/pylips-mcp"
+Homepage = "https://github.com/amineutron/pylips-mcp"
+Issues = "https://github.com/amineutron/pylips-mcp/issues"
+Repository = "https://github.com/amineutron/pylips-mcp"
 
 [build-system]
 requires = ["hatchling"]

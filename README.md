@@ -1,5 +1,7 @@
 # pylips-mcp
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+
 MCP server for controlling Philips Android TV via the JointSpace API and ADB.
 
 Exposes 14 tools covering power, volume, ambilight, app launching, and YouTube playback.
@@ -95,9 +97,24 @@ TV_HOST=192.168.0.XX TV_USER=xxx TV_PASS=xxx python server.py
 
 ## SSL Note
 
-Philips TVs use a TP Vision PKI chain from 2015 (SHA1). The included `tpvision_ca.pem`
-pins this certificate so connections use the actual CA rather than disabling all validation.
-Modern OpenSSL rejects SHA1 by default, so `SECLEVEL=0` is set in the adapter.
+Philips TVs present a TP Vision certificate chain from 2015 signed with SHA1.
+Modern OpenSSL and the Fedora/RHEL crypto policy reject SHA1 signatures, so a
+classic CA verification is impossible, even with the bundled chain and
+`SECLEVEL=0`.
+
+What this server does instead, honestly:
+
+- CA verification is disabled (it cannot succeed);
+- the SHA-256 fingerprint of the certificate presented by the TV must match the
+  leaf certificate shipped in `tpvision_ca.pem` (checked by urllib3 after the
+  TLS handshake, so a man-in-the-middle cannot impersonate the TV without the
+  private key). Verified against a real 55OLED705 (JointSpace 6, port 1926);
+- `PYLIPS_TLS_FINGERPRINT=<sha256 hex>` pins another TV, `PYLIPS_TLS_PIN=0`
+  disables pinning and logs a warning.
+
+`tpvision_ca.pem` is the public TP Vision chain (leaf `restfultv.tpvision.com`,
+intermediate `ca.tpvision.com`, root `www.tpvision.com`, valid until 2042),
+extracted from a TV with `openssl s_client -showcerts`. It contains no secret.
 
 ## License
 
