@@ -21,7 +21,6 @@ import os
 import ssl
 import sys
 from pathlib import Path
-from typing import Any
 
 # ---------------------------------------------------------------------------
 # TLS vers la TV Philips : epinglage par empreinte (certificate pinning)
@@ -346,7 +345,6 @@ class PhilipsTVController:
 
         Retourne True si l'envoi a reussi (sans garantie d'effet visible).
         """
-        import subprocess
         from adb_shell.adb_device import AdbDeviceTcp
         from adb_shell.auth.sign_pythonrsa import PythonRSASigner
         import os
@@ -709,7 +707,7 @@ class PhilipsTVController:
 
         except subprocess.TimeoutExpired:
             return "Erreur: timeout ADB"
-        except Exception as e:
+        except Exception:
             # Fallback sur catt en cas d'erreur
             return self._youtube_video_catt(video)
 
