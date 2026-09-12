@@ -114,9 +114,16 @@ if PYLIPS_PATH and os.path.isdir(PYLIPS_PATH):
     sys.path.insert(0, PYLIPS_PATH)
 
 try:
-    from mcp.server import Server
+    from mcp.server import Server, ServerRequestContext
     from mcp.server.stdio import stdio_server
-    from mcp.types import TextContent, Tool
+    from mcp.types import (
+        CallToolRequestParams,
+        CallToolResult,
+        ListToolsResult,
+        PaginatedRequestParams,
+        TextContent,
+        Tool,
+    )
 except ImportError:
     print("Error: mcp package not installed. Run: pip install mcp", file=sys.stderr)
     sys.exit(1)
@@ -780,12 +787,10 @@ class PhilipsTVController:
 
 
 # Instance globale du serveur
-app = Server("pylips-mcp")
 tv: PhilipsTVController = None
 
 
-@app.list_tools()
-async def list_tools() -> list[Tool]:
+def list_tools() -> list[Tool]:
     """Liste les outils disponibles."""
     return [
         Tool(
@@ -932,7 +937,6 @@ async def list_tools() -> list[Tool]:
     ]
 
 
-@app.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Execute un outil."""
     global tv
@@ -987,6 +991,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=result)]
     except Exception as e:
         return [TextContent(type="text", text=f"Erreur: {e}")]
+
+
+async def handle_list_tools(ctx: ServerRequestContext, params: PaginatedRequestParams | None) -> ListToolsResult:
+    return ListToolsResult(tools=list_tools())
+
+
+async def handle_call_tool(ctx: ServerRequestContext, params: CallToolRequestParams) -> CallToolResult:
+    return CallToolResult(content=await call_tool(params.name, params.arguments or {}))
+
+
+app = Server("pylips-mcp", on_list_tools=handle_list_tools, on_call_tool=handle_call_tool)
 
 
 async def main():
