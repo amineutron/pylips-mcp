@@ -117,6 +117,7 @@ try:
     from mcp.server import Server, ServerRequestContext
     from mcp.server.stdio import stdio_server
     from mcp.types import (
+        ToolAnnotations,
         CallToolRequestParams,
         CallToolResult,
         ListToolsResult,
@@ -790,31 +791,45 @@ class PhilipsTVController:
 tv: PhilipsTVController = None
 
 
+# Profils d'annotations MCP (ToolAnnotations) : ils disent au client ce que fait
+# un outil avant de l'appeler. Aucun outil de ce serveur n'ecrase de donnee,
+# donc destructiveHint reste False ; la distinction utile est la lecture seule
+# et l'idempotence (rejouable sans effet cumulatif).
+_READ = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+_SET = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+_ACTION = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
+
+
 def list_tools() -> list[Tool]:
     """Liste les outils disponibles."""
     return [
         Tool(
             name="power_on",
+            annotations=_SET,
             description="Allume la TV Philips",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
             name="power_off",
+            annotations=_SET,
             description="Eteint la TV Philips (standby)",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
             name="screen_off",
+            annotations=_SET,
             description="Eteint l'ecran de la TV tout en gardant le son actif (mode musique). Note: fonctionne principalement en source HDMI/TV, limite en mode Android.",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
             name="screen_on",
+            annotations=_SET,
             description="Rallume l'ecran de la TV apres un screen_off",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
             name="volume_up",
+            annotations=_ACTION,
             description="Augmente le volume de la TV (default +5)",
             inputSchema={
                 "type": "object",
@@ -826,6 +841,7 @@ def list_tools() -> list[Tool]:
         ),
         Tool(
             name="volume_down",
+            annotations=_ACTION,
             description="Baisse le volume de la TV (default -5)",
             inputSchema={
                 "type": "object",
@@ -837,6 +853,7 @@ def list_tools() -> list[Tool]:
         ),
         Tool(
             name="volume_set",
+            annotations=_SET,
             description="Regle le volume a un niveau specifique",
             inputSchema={
                 "type": "object",
@@ -853,21 +870,25 @@ def list_tools() -> list[Tool]:
         ),
         Tool(
             name="mute",
+            annotations=_SET,
             description="Coupe ou remet le son de la TV",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
             name="ambilight_on",
+            annotations=_SET,
             description="Active l'Ambilight de la TV",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
             name="ambilight_off",
+            annotations=_SET,
             description="Desactive l'Ambilight de la TV",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
             name="ambilight_mode",
+            annotations=_SET,
             description="Change le mode Ambilight",
             inputSchema={
                 "type": "object",
@@ -883,11 +904,13 @@ def list_tools() -> list[Tool]:
         ),
         Tool(
             name="list_apps",
+            annotations=_READ,
             description="Liste les applications disponibles sur la TV",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
             name="launch_app",
+            annotations=_ACTION,
             description="Lance une application sur la TV",
             inputSchema={
                 "type": "object",
@@ -903,6 +926,7 @@ def list_tools() -> list[Tool]:
         ),
         Tool(
             name="youtube_video",
+            annotations=_ACTION,
             description="Lance YouTube sur une video specifique (URL youtube ou ID de video)",
             inputSchema={
                 "type": "object",
@@ -917,11 +941,13 @@ def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_state",
+            annotations=_READ,
             description="Retourne l'etat actuel de la TV (allumee/standby)",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
             name="send_key",
+            annotations=_ACTION,
             description="Envoie une touche de telecommande",
             inputSchema={
                 "type": "object",
