@@ -317,44 +317,87 @@ class PhilipsTVController:
             return {"error": str(e)}
 
     def power_on(self) -> str:
-        """Allume la TV.
+        """Allume la TV — sequence complete, auto-suffisante et verifiee.
 
-        Strategies (dans l'ordre):
-        1. Si deja allumee -> rien a faire
-        2. Touche Standby via input/key (toggle, fonctionne depuis veille reseau)
-        3. POST powerstate On
-        4. Wake-on-LAN (MAC depuis config.yaml)
+        1. Deja allumee -> rien a faire
+        2. Injoignable -> Wake-on-LAN PUIS attente que la carte reseau
+           reponde (5-25s) — avant, on rendait la main ici et l'allumage
+           n'aboutissait jamais depuis la veille profonde (bug 2026-08-12)
+        3. Joignable en veille -> touche Standby (toggle) puis POST
+           powerstate On (idempotent, corrige un eventuel toggle inverse)
+        4. Verification de l'etat REEL avant de repondre "TV allumee"
         """
+        import time as _time
+
         self._init_pylips()
 
-        # 1. Tester si la TV est joignable (connect_timeout tres court = pas de longue attente)
         state = self._api_call("powerstate", connect_timeout=1.5, timeout=3)
-
-        ps = state.get("powerstate", "")
-        if ps == "On":
+        if state.get("powerstate") == "On":
             return "TV deja allumee"
 
-        if "error" not in state:
-            # TV joignable (standby reseau: StandbyKeep, Standby...) → touche Standby pour reveiller
-            result = self._api_call("input/key", "POST", {"key": "Standby"}, timeout=5)
-            if "error" not in result:
-                return "TV allumee"
-            result2 = self._api_call("powerstate", "POST", {"powerstate": "On"}, timeout=5)
-            if "error" not in result2:
-                return "TV allumee"
+        via_wol = False
+        if "error" in state:
+            # TV injoignable (veille profonde) -> WoL + attente de reveil reseau
+            self._send_wol()
+            via_wol = True
+            state = self._wait_reachable(deadline_s=25.0)
+            if state is None:
+                raise RuntimeError(
+                    "Wake-on-LAN envoye mais la TV ne repond pas apres 25s — "
+                    "elle est probablement coupee du secteur (le WoL ne "
+                    "fonctionne que depuis la veille, pas depuis l'arret complet)")
+            if state.get("powerstate") == "On":
+                return "TV allumee (reveillee par Wake-on-LAN)"
 
-        # TV injoignable (completement eteinte) → WoL immediat
-        if self.mac:
-            try:
-                from wakeonlan import send_magic_packet
-                send_magic_packet(self.mac)
-                return "Signal Wake-on-LAN envoye (attends 15-20s que la TV demarre)"
-            except ImportError:
-                return "Erreur: wakeonlan non installe. Lance: pip install wakeonlan"
-            except Exception as e:
-                return "Erreur WoL: {}".format(e)
+        # Joignable mais en veille (Standby/StandbyKeep) : toggle puis ordre
+        # ferme. L'ordre importe — la touche d'abord, le POST On idempotent
+        # ensuite pour garantir l'etat final quel que soit l'effet du toggle.
+        self._api_call("input/key", "POST", {"key": "Standby"}, timeout=5)
+        _time.sleep(1.0)
+        self._api_call("powerstate", "POST", {"powerstate": "On"}, timeout=5)
 
-        return "Erreur: TV injoignable et aucune MAC configuree pour Wake-on-LAN."
+        final = self._confirm_on(deadline_s=12.0)
+        if final == "On":
+            return "TV allumee (via Wake-on-LAN + API)" if via_wol else "TV allumee"
+        raise RuntimeError(
+            f"Sequence d'allumage envoyee mais la TV reste en etat '{final}'")
+
+    def _send_wol(self) -> None:
+        """Envoie le paquet magique Wake-on-LAN (leve si impossible)."""
+        if not self.mac:
+            raise RuntimeError("TV injoignable et aucune MAC configuree pour Wake-on-LAN")
+        try:
+            from wakeonlan import send_magic_packet
+            send_magic_packet(self.mac)
+        except ImportError:
+            raise RuntimeError("wakeonlan non installe. Lance: pip install wakeonlan")
+        except Exception as e:
+            raise RuntimeError(f"Wake-on-LAN: {e}")
+
+    def _wait_reachable(self, deadline_s: float):
+        """Polle powerstate jusqu'a reponse HTTP. None si toujours injoignable."""
+        import time as _time
+        end = _time.time() + deadline_s
+        while _time.time() < end:
+            state = self._api_call("powerstate", connect_timeout=1.5, timeout=3)
+            if "error" not in state:
+                return state
+            _time.sleep(2.0)
+        return None
+
+    def _confirm_on(self, deadline_s: float) -> str:
+        """Attend que powerstate atteigne 'On'. Retourne le dernier etat vu."""
+        import time as _time
+        end = _time.time() + deadline_s
+        last = "inconnu"
+        while _time.time() < end:
+            state = self._api_call("powerstate", connect_timeout=1.5, timeout=3)
+            last = state.get("powerstate", "inconnu") if "error" not in state else "injoignable"
+            if last == "On":
+                return "On"
+            _time.sleep(1.5)
+        return last
+
 
     def power_off(self) -> str:
         """Eteint la TV (standby)."""
