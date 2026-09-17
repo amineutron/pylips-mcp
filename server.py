@@ -22,6 +22,7 @@ import re
 import ssl
 import sys
 from pathlib import Path
+from typing import Optional
 
 # ---------------------------------------------------------------------------
 # TLS vers la TV Philips : epinglage par empreinte (certificate pinning)
