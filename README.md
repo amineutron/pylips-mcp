@@ -130,6 +130,16 @@ extracted from a TV with `openssl s_client -showcerts`. It contains no secret.
 
 MIT
 
+## Volume en HDMI ARC
+
+Quand la TV est reliee a un ampli en HDMI ARC, le son ne sort pas de la TV :
+agir sur son volume n'a aucun effet audible. Si `denon.host` est renseigne
+dans la configuration, `volume_up`, `volume_down`, `volume_set` et `mute`
+sont donc rediriges vers l'ampli Denon ; sinon ils passent par l'API de la TV.
+
+Pour piloter l'ampli directement (entrees, extinction, statut), utiliser
+[denon-mcp](https://github.com/amineutron/denon-mcp).
+
 ## Part of the Lyra ecosystem
 
 | Dépôt | Rôle |

@@ -18,6 +18,7 @@ Configuration:
 import asyncio
 import json
 import os
+import re
 import ssl
 import sys
 from pathlib import Path
@@ -188,6 +189,28 @@ def load_config() -> dict:
             print(f"Warning: Could not load secrets.yaml: {e}", file=sys.stderr)
 
     return config
+
+
+# Motifs d'ID YouTube, partages par les deux chemins (ADB et catt).
+# Ils etaient copies-colles dans chaque methode : un correctif sur l'un
+# n'atteignait pas l'autre.
+_YOUTUBE_ID_PATTERNS = (
+    r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)([a-zA-Z0-9_-]{11})',
+    r'^([a-zA-Z0-9_-]{11})$',
+)
+
+
+def extract_video_id(video: str) -> Optional[str]:
+    """Extrait l'ID d'une video YouTube, ou None si l'entree n'est pas reconnue.
+
+    La validation est obligatoire avant tout usage : l'ID finit dans une
+    commande lancee sur la TV.
+    """
+    for pattern in _YOUTUBE_ID_PATTERNS:
+        match = re.search(pattern, video)
+        if match:
+            return match.group(1)
+    return None
 
 
 def send_denon_command(host: str, port: int, command: str, timeout: int = 3) -> str:
@@ -671,18 +694,8 @@ class PhilipsTVController:
             # Fallback: essayer catt si ADB non disponible
             return self._youtube_video_catt(video)
 
-        # Extraire et valider l'ID de la video (obligatoire pour eviter l'injection ADB)
-        video_id = None
-        patterns = [
-            r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)([a-zA-Z0-9_-]{11})',
-            r'^([a-zA-Z0-9_-]{11})$'
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, video)
-            if match:
-                video_id = match.group(1)
-                break
-
+        # Validation obligatoire : l'ID part dans une commande ADB distante
+        video_id = extract_video_id(video)
         if not video_id:
             return f"URL YouTube invalide: {video[:80]!r}"
 
@@ -732,17 +745,10 @@ class PhilipsTVController:
         if not os.path.exists(catt_path):
             return "Erreur: ni ADB ni catt disponibles"
 
-        video_id = video
-        patterns = [
-            r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)([a-zA-Z0-9_-]{11})',
-            r'^([a-zA-Z0-9_-]{11})$'
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, video)
-            if match:
-                video_id = match.group(1)
-                break
+        # Auparavant, une entree non reconnue etait castee telle quelle.
+        video_id = extract_video_id(video)
+        if not video_id:
+            return f"URL YouTube invalide: {video[:80]!r}"
 
         url = f"https://www.youtube.com/watch?v={video_id}"
 
