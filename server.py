@@ -119,13 +119,13 @@ try:
     from mcp.server import Server, ServerRequestContext
     from mcp.server.stdio import stdio_server
     from mcp.types import (
-        ToolAnnotations,
         CallToolRequestParams,
         CallToolResult,
         ListToolsResult,
         PaginatedRequestParams,
         TextContent,
         Tool,
+        ToolAnnotations,
     )
 except ImportError:
     print("Error: mcp package not installed. Run: pip install mcp", file=sys.stderr)
@@ -686,7 +686,6 @@ class PhilipsTVController:
 
     def youtube_video(self, video: str) -> str:
         """Lance YouTube sur une video specifique via ADB (utilise le compte connecte)."""
-        import re
         import subprocess
 
         # Chemin ADB (telecharge depuis Google)
