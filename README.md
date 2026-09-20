@@ -36,6 +36,10 @@ Recorded against the real TV with [`docs/demo/record.sh`](docs/demo/record.sh): 
 | `send_key` | Envoie une touche de telecommande |
 <!-- tools:end -->
 
+### YouTube ID extraction
+
+`extract_video_id` is deliberately duplicated in [catt-mcp](https://github.com/amineutron/catt-mcp) (`cast_youtube`, Chromecast with start position and dual-screen sync). Both servers stay installable on their own; each one tests its copy with the same table of cases (`tests/test_youtube_id.py`). Decision recorded on 2026-09-20.
+
 ## Requirements
 
 - Python 3.10+
