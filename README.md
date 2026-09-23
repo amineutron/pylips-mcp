@@ -48,6 +48,18 @@ Recorded against the real TV with [`docs/demo/record.sh`](docs/demo/record.sh): 
 - ADB enabled on the TV (for YouTube deep linking)
 - `wakeonlan` Python package (optional, for Wake-on-LAN)
 
+## Installation en une ligne
+
+```bash
+uvx pylips-mcp                 # depuis PyPI ; avant publication : uvx --from git+https://github.com/amineutron/pylips-mcp pylips-mcp
+```
+
+Configuration Claude Desktop / Claude Code (`mcpServers`) :
+
+```json
+{ "pylips": { "command": "uvx", "args": ["pylips-mcp"], "env": { "TV_HOST": "192.0.2.10", "TV_USER": "...", "TV_PASS": "..." } } }
+```
+
 ## Setup
 
 ### 1. Pair with your TV
