@@ -1,0 +1,68 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.amineutron/pylips-mcp",
+  "title": "Philips TV (JointSpace + ADB)",
+  "description": "Control a Philips Android TV over JointSpace and ADB: power, volume, apps, keys, screen, Ambilight.",
+  "repository": {
+    "url": "https://github.com/amineutron/pylips-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/amineutron/pylips-mcp#readme",
+  "version": "0.2.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "pylips-mcp",
+      "runtimeHint": "uvx",
+      "version": "0.2.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "TV_HOST",
+          "description": "IP address of the Philips TV",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "TV_USER",
+          "description": "JointSpace pairing username (from pylips pairing)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "TV_PASS",
+          "description": "JointSpace pairing password",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "DENON_HOST",
+          "description": "Optional Denon AVR IP: volume and mute are redirected to the amplifier (HDMI ARC)",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "DENON_PORT",
+          "description": "Denon telnet port",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "default": "23"
+        },
+        {
+          "name": "PYLIPS_TLS_FINGERPRINT",
+          "description": "Optional SHA-256 fingerprint to pin the TV certificate",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
