@@ -487,9 +487,24 @@ class PhilipsTVController:
         return "Ecran rallume"
 
     def get_state(self) -> dict:
-        """Retourne l'etat actuel de la TV."""
+        """Etat de la TV : alimentation, volume, mute, mode ambilight.
+
+        Ne renvoyait que powerstate ; un client (neutroncore, roadmap #73) qui
+        veut afficher l'etat sans reimplementer JointSpace a besoin du reste.
+        Les cles powerstate/error sont conservees telles quelles.
+        """
         self._init_pylips()
-        return self._api_call("powerstate")
+        state = self._api_call("powerstate", connect_timeout=1.5, timeout=3)
+        if "error" in state:
+            return state
+        audio = self._api_call("audio/volume", timeout=3)
+        ambi = self._api_call("ambilight/currentconfiguration", timeout=3)
+        power = self._api_call("ambilight/power", timeout=3)
+        state["volume"] = audio.get("current") if "error" not in audio else None
+        state["muted"] = bool(audio.get("muted")) if "error" not in audio else None
+        state["ambilight_on"] = (power.get("power") == "On") if "error" not in power else None
+        state["ambilight_mode"] = ambi.get("styleName") if "error" not in ambi else None
+        return state
 
     def volume_up(self, step: int = 5) -> str:
         """Augmente le volume de X (default 5).
@@ -991,7 +1006,7 @@ def list_tools() -> list[Tool]:
         Tool(
             name="get_state",
             annotations=_READ,
-            description="Retourne l'etat actuel de la TV (allumee/standby)",
+            description="Retourne l'etat actuel de la TV : powerstate (On/Standby), volume, muted, ambilight_on, ambilight_mode",
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
