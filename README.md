@@ -33,7 +33,7 @@ Recorded against the real TV with [`docs/demo/record.sh`](docs/demo/record.sh): 
 | `list_apps` | Liste les applications disponibles sur la TV |
 | `launch_app` | Lance une application sur la TV |
 | `youtube_video` | Lance YouTube sur une video specifique (URL youtube ou ID de video) |
-| `get_state` | Retourne l'etat actuel de la TV (allumee/standby) |
+| `get_state` | Retourne l'etat actuel de la TV : powerstate (On/Standby), volume, muted, ambilight_on, ambilight_mode |
 | `send_key` | Envoie une touche de telecommande |
 <!-- tools:end -->
 
