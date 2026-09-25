@@ -15,14 +15,13 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from server import PhilipsTVController  # noqa: E402
+from pylips_mcp.server import PhilipsTVController  # noqa: E402
 
 
 @pytest.fixture()
 def controller():
     tv = PhilipsTVController(host="192.0.2.1", user="u", password="p",
                              mac="00:11:22:33:44:55")
-    tv._initialized = True          # pas d'init pylips reelle
     return tv
 
 
@@ -96,7 +95,6 @@ class TestPowerOn:
 
     def test_pas_de_mac_erreur_claire(self):
         tv = PhilipsTVController(host="192.0.2.1", user="u", password="p", mac="")
-        tv._initialized = True
         tv._api_call = scripted_api([{"error": "timeout"}])
         with pytest.raises(RuntimeError, match="aucune MAC"):
             tv.power_on()

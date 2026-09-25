@@ -2,6 +2,20 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), versions [SemVer](https://semver.org/lang/fr/).
 
+## [0.3.0] - 2026-09-25
+
+### Modifié
+
+- The code now lives in a `pylips_mcp` package (`pylips_mcp.server`, with `tpvision_ca.pem` inside it). The wheel used to install a top-level `server` module and the certificate at the root of site-packages, clashing with denon-mcp and catt-mcp. `python server.py` from a clone still works (thin launcher), and `python -m pylips_mcp` is new.
+
+### Supprimé
+
+- The optional import of the pylips library (`PYLIPS_PATH`, `pylips_path`): it was never used, every call already goes to the JointSpace API directly. Only the one-time pairing needs pylips; the README no longer suggests `pip install pylips`, an unrelated PyPI package.
+
+### Corrigé
+
+- `pylips-mcp --help` and `--version` answer without any configuration (they used to start the server).
+
 ## [0.2.1] - 2026-09-24
 
 ### Ajouté

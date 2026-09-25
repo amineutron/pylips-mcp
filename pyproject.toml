@@ -1,6 +1,6 @@
 [project]
 name = "pylips-mcp"
-version = "0.2.1"
+version = "0.3.0"
 description = "MCP server for Philips TV control (JointSpace API + ADB)"
 readme = "README.md"
 authors = [{ name = "amineutron" }]
@@ -23,13 +23,13 @@ Issues = "https://github.com/amineutron/pylips-mcp/issues"
 Repository = "https://github.com/amineutron/pylips-mcp"
 
 [project.scripts]
-pylips-mcp = "server:cli"
+pylips-mcp = "pylips_mcp.server:cli"
 
 [tool.hatch.build.targets.wheel]
-only-include = ["server.py", "tpvision_ca.pem"]
+packages = ["pylips_mcp"]
 
 [tool.hatch.build.targets.sdist]
-include = ["server.py", "README.md", "LICENSE", "config.example.yaml", "tests/", "tpvision_ca.pem"]
+include = ["pylips_mcp/", "server.py", "README.md", "LICENSE", "config.example.yaml", "tests/"]
 
 [build-system]
 requires = ["hatchling"]

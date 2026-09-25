@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-MCP Server wrapper pour pylips - Controle TV Philips.
+MCP Server pour TV Philips (API JointSpace v6).
 
-Ce serveur expose les commandes pylips via le protocole MCP pour
-permettre a Lyra de controler la TV Philips avec une latence minimale.
+Ce serveur parle directement a l'API JointSpace de la TV (HTTPS, digest,
+certificat TP Vision epingle) et expose ses commandes via le protocole MCP
+pour permettre a Lyra de controler la TV avec une latence minimale. La
+bibliotheque pylips n'est pas necessaire a l'execution : seuls les
+identifiants issus de l'appairage (fait une fois) le sont.
 
 Usage:
     python server.py
@@ -109,12 +112,6 @@ def _build_tv_session():
 
     return session
 
-# Bibliotheque pylips (https://github.com/eslavnov/pylips) : soit installee dans l'environnement,
-# soit un clone local indique par PYLIPS_PATH. Aucun chemin par defaut.
-PYLIPS_PATH = os.environ.get("PYLIPS_PATH", "")
-if PYLIPS_PATH and os.path.isdir(PYLIPS_PATH):
-    sys.path.insert(0, PYLIPS_PATH)
-
 try:
     from mcp.server import Server, ServerRequestContext
     from mcp.server.stdio import stdio_server
@@ -149,8 +146,11 @@ def load_config() -> dict:
     # Ordre de resolution : variables d'environnement, puis YAML (PYLIPS_CONFIG, ./config.yaml,
     # config.yaml a cote du serveur, ou celui de Lyra si le serveur vit dans son arborescence).
     candidates = [Path(p) for p in (os.environ.get("PYLIPS_CONFIG", ""),) if p]
-    candidates += [Path.cwd() / "config.yaml", Path(__file__).parent / "config.yaml",
-                   Path(__file__).parent.parent.parent / "config.yaml"]
+    # racine du depot (le code vit dans pylips_mcp/) : config.yaml a cote du
+    # serveur, ou celui de Lyra quand le depot est dans lyra/mcp-servers/
+    repo_root = Path(__file__).resolve().parent.parent
+    candidates += [Path.cwd() / "config.yaml", repo_root / "config.yaml",
+                   repo_root.parent.parent / "config.yaml"]
     config_path = next((c for c in candidates if c.exists()), None)
     if config_path is not None and not config["tv"]["host"]:
         try:
@@ -249,7 +249,7 @@ def send_denon_command(host: str, port: int, command: str, timeout: int = 3) -> 
 
 
 class PhilipsTVController:
-    """Controleur pour TV Philips via pylips."""
+    """Controleur pour TV Philips (API JointSpace v6, appels HTTPS directs)."""
 
     def __init__(self, host: str, user: str, password: str, denon_host: str = "", denon_port: int = 23, mac: str = ""):
         self.host = host
@@ -258,31 +258,8 @@ class PhilipsTVController:
         self.denon_host = denon_host
         self.denon_port = denon_port
         self.mac = mac  # MAC address pour Wake-on-LAN
-        self._pylips = None
-        self._initialized = False
         self._screen_muted = False  # Etat du mute ecran (toggle local)
         self._session = _build_tv_session()  # Session HTTP avec cert TP Vision
-
-    def _init_pylips(self):
-        """Initialise pylips de maniere paresseuse."""
-        if self._initialized:
-            return
-
-        try:
-            # Importer pylips
-            from pylips import Pylips
-            self._pylips = Pylips(
-                host=self.host,
-                user=self.user,
-                password=self.password
-            )
-            self._initialized = True
-        except ImportError:
-            # Fallback: utiliser requests directement
-            print("pylips not found, using direct API", file=sys.stderr)
-            self._initialized = True
-        except Exception as e:
-            print(f"Error initializing pylips: {e}", file=sys.stderr)
 
     def _api_call(self, endpoint: str, method: str = "GET", body: dict = None,
                   timeout: int = 5, connect_timeout: float = None) -> dict:
@@ -328,8 +305,6 @@ class PhilipsTVController:
         4. Verification de l'etat REEL avant de repondre "TV allumee"
         """
         import time as _time
-
-        self._init_pylips()
 
         state = self._api_call("powerstate", connect_timeout=1.5, timeout=3)
         if state.get("powerstate") == "On":
@@ -401,7 +376,6 @@ class PhilipsTVController:
 
     def power_off(self) -> str:
         """Eteint la TV (standby)."""
-        self._init_pylips()
         result = self._api_call("powerstate", "POST", {"powerstate": "Standby"})
         if "error" not in result:
             self._screen_muted = False  # Reset: au reveil l'ecran sera actif
@@ -461,7 +435,6 @@ class PhilipsTVController:
         1. JointSpace MAIN_MUTE_SCREEN (fonctionne sur source HDMI/TV)
         2. Screensaver Philips via ADB (DreamerService) en fallback Android
         """
-        self._init_pylips()
         if self._screen_muted:
             return "Ecran deja eteint (son actif)"
 
@@ -478,7 +451,6 @@ class PhilipsTVController:
 
     def screen_on(self) -> str:
         """Rallume l'ecran (apres screen_off)."""
-        self._init_pylips()
         # Toujours tenter le toggle (si l'ecran etait mute via JointSpace)
         self._toggle_screen_mute()
         # Touche Info pour sortir du screensaver
@@ -493,7 +465,6 @@ class PhilipsTVController:
         veut afficher l'etat sans reimplementer JointSpace a besoin du reste.
         Les cles powerstate/error sont conservees telles quelles.
         """
-        self._init_pylips()
         state = self._api_call("powerstate", connect_timeout=1.5, timeout=3)
         if "error" in state:
             return state
@@ -533,7 +504,6 @@ class PhilipsTVController:
             return "Volume augmente (Denon)"
 
         # Fallback: API TV (ne marche pas si HDMI ARC actif)
-        self._init_pylips()
         current = self._api_call("audio/volume")
         if "error" in current:
             return f"Erreur: {current.get('error', 'unknown')}"
@@ -570,7 +540,6 @@ class PhilipsTVController:
             return "Volume baisse (Denon)"
 
         # Fallback: API TV
-        self._init_pylips()
         current = self._api_call("audio/volume")
         if "error" in current:
             return f"Erreur: {current.get('error', 'unknown')}"
@@ -616,7 +585,6 @@ class PhilipsTVController:
             return f"Volume Denon regle a {level}"
 
         # Fallback: API TV (ne marche pas si HDMI ARC actif)
-        self._init_pylips()
         level = max(0, min(60, level))
 
         # Lire le volume actuel d'abord
@@ -651,7 +619,6 @@ class PhilipsTVController:
             return f"Erreur Denon: {response}"
 
         # Fallback: API TV
-        self._init_pylips()
         result = self._api_call("input/key", "POST", {"key": "Mute"})
         if "error" not in result:
             return "Mute toggle"
@@ -659,7 +626,6 @@ class PhilipsTVController:
 
     def ambilight_on(self) -> str:
         """Active l'Ambilight."""
-        self._init_pylips()
         result = self._api_call("ambilight/power", "POST", {"power": "On"})
         if "error" not in result:
             return "Ambilight active"
@@ -667,7 +633,6 @@ class PhilipsTVController:
 
     def ambilight_off(self) -> str:
         """Desactive l'Ambilight."""
-        self._init_pylips()
         result = self._api_call("ambilight/power", "POST", {"power": "Off"})
         if "error" not in result:
             return "Ambilight desactive"
@@ -675,7 +640,6 @@ class PhilipsTVController:
 
     def ambilight_mode(self, mode: str) -> str:
         """Change le mode Ambilight."""
-        self._init_pylips()
 
         # Mapping des modes - menuSetting requis pour que ca marche
         mode_configs = {
@@ -844,7 +808,6 @@ class PhilipsTVController:
         if key not in self._VALID_KEYS:
             valid = ", ".join(sorted(self._VALID_KEYS))
             return f"Touche invalide: {key!r}. Touches valides: {valid}"
-        self._init_pylips()
         result = self._api_call("input/key", "POST", {"key": key})
         if "error" not in result:
             return f"Touche {key} envoyee"
@@ -1129,7 +1092,21 @@ if __name__ == "__main__":
     asyncio.run(main())
 
 
-def cli() -> None:
-    """Point d'entree console (pip/uvx) : lance le serveur MCP sur stdio."""
+def cli(argv: list[str] | None = None) -> None:
+    """Point d'entree console (pip/uvx) : lance le serveur MCP sur stdio.
+    --help et --version repondent sans configuration ni TV."""
+    import argparse
     import asyncio as _asyncio
+
+    from pylips_mcp import __version__
+
+    parser = argparse.ArgumentParser(
+        prog="pylips-mcp",
+        description="MCP server for Philips Android TVs (JointSpace API v6 over HTTPS), stdio transport.",
+        epilog="Configuration: TV_HOST, TV_USER, TV_PASS (JointSpace credentials from a one-time pairing), "
+               "PYLIPS_CONFIG (path to a config.yaml), PYLIPS_TLS_FINGERPRINT (pin another TV certificate), "
+               "PYLIPS_TLS_PIN=0 (disable pinning, logged).",
+    )
+    parser.add_argument("--version", action="version", version=f"pylips-mcp {__version__}")
+    parser.parse_args(argv)
     _asyncio.run(main())

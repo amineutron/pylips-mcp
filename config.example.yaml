@@ -1,6 +1,5 @@
 tv:
   host: "192.168.0.XX"       # IP de la TV Philips
-  user: "generated_user"     # Généré lors du pairing (pylips --init)
-  pass: "generated_pass"     # Généré lors du pairing (pylips --init)
+  user: "generated_user"     # Généré lors de l'appairage JointSpace (une fois, voir README)
+  pass: "generated_pass"     # Généré lors de l'appairage JointSpace (une fois, voir README)
 
-pylips_path: "/path/to/pylips"   # Chemin vers le repo pylips (ou PYLIPS_PATH env var)

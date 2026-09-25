@@ -44,7 +44,7 @@ Recorded against the real TV with [`docs/demo/record.sh`](docs/demo/record.sh): 
 ## Requirements
 
 - Python 3.10+
-- [pylips](https://github.com/eslavnov/pylips) installed and accessible
+- JointSpace credentials (user + password) from a one-time pairing with the TV (see Setup); the server itself talks to the TV API directly and does not need pylips at runtime
 - Philips Android TV with JointSpace API enabled (2016+ models)
 - ADB enabled on the TV (for YouTube deep linking)
 - `wakeonlan` Python package (optional, for Wake-on-LAN)
@@ -65,17 +65,17 @@ Configuration Claude Desktop / Claude Code (`mcpServers`) :
 
 ### 1. Pair with your TV
 
-```bash
-pip install pylips
-python -m pylips --host 192.168.0.XX --init
-```
+Pairing is done once, to get a JointSpace user and password. Use the pairing tool of
+[eslavnov/pylips](https://github.com/eslavnov/pylips) from a clone of that repository
+(the `pylips` package on PyPI is an unrelated project: do not `pip install pylips`),
+and follow its README with your TV's IP. pylips-mcp does not need pylips afterwards.
 
-This generates credentials saved in `~/.config/pylips/pylips.conf`.
+Keep the user and password the pairing gives you: they go into `config.yaml` (step 3) or `TV_USER` / `TV_PASS`.
 
 ### 2. Install dependencies
 
 ```bash
-pip install mcp requests wakeonlan
+pip install pylips-mcp        # or: uvx pylips-mcp
 ```
 
 ### 3. Configure
@@ -88,20 +88,24 @@ tv:
   user: "your_user"
   pass: "your_password"
 
-pylips_path: "/path/to/pylips"  # or set PYLIPS_PATH env var
 ```
 
 ### 4. Run
 
 ```bash
-python server.py
+pylips-mcp                    # installed (pip, uvx) ; `pylips-mcp --help` lists the settings
+python -m pylips_mcp          # same thing, from any environment where the package is installed
+python server.py              # from a clone, without installing (thin launcher, code in pylips_mcp/)
 ```
 
 Or set via environment variables:
 
 ```bash
-TV_HOST=192.168.0.XX TV_USER=xxx TV_PASS=xxx python server.py
+TV_HOST=192.168.0.XX TV_USER=xxx TV_PASS=xxx pylips-mcp
 ```
+
+The code lives in the `pylips_mcp` package (with the TP Vision certificate), so it can be
+installed next to other MCP servers without module name clashes.
 
 ## Claude Desktop Configuration
 
@@ -114,8 +118,7 @@ TV_HOST=192.168.0.XX TV_USER=xxx TV_PASS=xxx python server.py
       "env": {
         "TV_HOST": "192.168.0.XX",
         "TV_USER": "your_user",
-        "TV_PASS": "your_password",
-        "PYLIPS_PATH": "/path/to/pylips"
+        "TV_PASS": "your_password"
       }
     }
   }

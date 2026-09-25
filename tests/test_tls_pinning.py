@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import server  # noqa: E402
+from pylips_mcp import server  # noqa: E402
 
 BUNDLE = Path(server.__file__).parent / "tpvision_ca.pem"
 

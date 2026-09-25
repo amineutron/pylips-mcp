@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-import server  # noqa: E402
+from pylips_mcp import server  # noqa: E402
 
 
 def test_env_only_without_any_yaml(tmp_path, monkeypatch):

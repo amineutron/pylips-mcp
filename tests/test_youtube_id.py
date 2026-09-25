@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from server import extract_video_id  # noqa: E402
+from pylips_mcp.server import extract_video_id  # noqa: E402
 
 
 @pytest.mark.parametrize("entree, attendu", [
