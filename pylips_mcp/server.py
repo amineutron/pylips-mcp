@@ -248,6 +248,74 @@ def send_denon_command(host: str, port: int, command: str, timeout: int = 3) -> 
         return f"ERROR: {str(e)}"
 
 
+def rgb_to_ambilight_color(r: int, g: int, b: int, brightness: int | None = None) -> dict:
+    """RVB (0-255) -> couleur JointSpace {hue, saturation, brightness}, chacune sur 0-255.
+
+    La TV attend la teinte ramenee de 0-360 degres a 0-255 (comme pylips).
+    `brightness` (0-255) remplace la luminosite deduite de la couleur.
+    """
+    import colorsys
+
+    for name, value in (("r", r), ("g", g), ("b", b)):
+        if not isinstance(value, int) or not 0 <= value <= 255:
+            raise ValueError(f"{name} doit etre un entier entre 0 et 255 (recu {value!r})")
+    if brightness is not None and (not isinstance(brightness, int) or not 0 <= brightness <= 255):
+        raise ValueError(f"brightness doit etre un entier entre 0 et 255 (recu {brightness!r})")
+    h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    return {
+        "hue": round(h * 255),
+        "saturation": round(s * 255),
+        "brightness": brightness if brightness is not None else round(v * 255),
+    }
+
+
+# Style qui accepte une couleur fixe : il varie selon le modele. Les anciens exposent
+# FOLLOW_COLOR ; la 55OLED705 (2026-09-26) n'a que « Lounge light », dont l'algorithme
+# MANUAL_HUE donne une couleur fixe (mesure : pixels emis 255/0/0 pour du rouge).
+COLOR_ALGORITHM = "MANUAL_HUE"
+DEFAULT_COLOR_STYLE = "Lounge light"
+
+
+def color_style_from_supported(supported: dict) -> str | None:
+    """Nom du style qui propose l'algorithme MANUAL_HUE dans ambilight/supportedstyles.
+
+    FOLLOW_COLOR est prefere s'il existe ; None si la reponse ne le dit pas."""
+    styles = supported.get("supportedStyles") if isinstance(supported, dict) else None
+    noms = [
+        st.get("styleName") for st in (styles if isinstance(styles, list) else [])
+        if isinstance(st, dict) and COLOR_ALGORITHM in (st.get("algorithms") or [])
+    ]
+    noms = [n for n in noms if isinstance(n, str) and n]
+    if "FOLLOW_COLOR" in noms:
+        return "FOLLOW_COLOR"
+    return noms[0] if noms else None
+
+
+def ambilight_color_body(r: int, g: int, b: int, brightness: int | None = None,
+                         style: str = DEFAULT_COLOR_STYLE) -> dict:
+    """Corps POST ambilight/currentconfiguration pour une couleur fixe (algorithme MANUAL_HUE)."""
+    return {
+        "styleName": style,
+        "isExpert": True,
+        "algorithm": COLOR_ALGORITHM,
+        "colorSettings": {
+            "color": rgb_to_ambilight_color(r, g, b, brightness),
+            "colorDelta": {"hue": 0, "saturation": 0, "brightness": 0},
+            "speed": 255,
+        },
+    }
+
+
+def color_applied(config: dict, style: str) -> bool:
+    """La TV a-t-elle pris la couleur ? Elle repond 200 meme quand elle ignore le corps :
+    seule la relecture de currentconfiguration le dit."""
+    if not isinstance(config, dict) or config.get("styleName") != style:
+        return False
+    settings = config.get("colorSettings")
+    algo = config.get("algorithm") or (settings.get("algorithm") if isinstance(settings, dict) else None)
+    return algo == COLOR_ALGORITHM
+
+
 class PhilipsTVController:
     """Controleur pour TV Philips (API JointSpace v6, appels HTTPS directs)."""
 
@@ -259,6 +327,7 @@ class PhilipsTVController:
         self.denon_port = denon_port
         self.mac = mac  # MAC address pour Wake-on-LAN
         self._screen_muted = False  # Etat du mute ecran (toggle local)
+        self._color_style_cache: str | None = None  # style couleur fixe propre au modele
         self._session = _build_tv_session()  # Session HTTP avec cert TP Vision
 
     def _api_call(self, endpoint: str, method: str = "GET", body: dict = None,
@@ -659,6 +728,32 @@ class PhilipsTVController:
             return f"Ambilight mode: {mode}"
         return f"Erreur: {result.get('error', 'unknown')}"
 
+    def _color_style(self) -> str:
+        """Style couleur fixe de CETTE TV, lu une fois dans supportedstyles."""
+        if self._color_style_cache is None:
+            style = color_style_from_supported(self._api_call("ambilight/supportedstyles"))
+            if style is None:
+                return DEFAULT_COLOR_STYLE  # lecture ratee : on reessaiera au prochain appel
+            self._color_style_cache = style
+        return self._color_style_cache
+
+    def ambilight_color(self, r: int, g: int, b: int, brightness: int | None = None) -> str:
+        """Couleur fixe de l'Ambilight, verifiee par relecture de la configuration."""
+        try:
+            rgb_to_ambilight_color(r, g, b, brightness)  # valide avant tout appel reseau
+        except ValueError as e:
+            return f"Erreur: {e}"
+        style = self._color_style()
+        result = self._api_call("ambilight/currentconfiguration", "POST",
+                                ambilight_color_body(r, g, b, brightness, style))
+        if "error" in result:
+            return f"Erreur: {result.get('error', 'unknown')}"
+        config = self._api_call("ambilight/currentconfiguration")
+        if not color_applied(config, style):
+            actuel = config.get("styleName", "?") if isinstance(config, dict) else "?"
+            return f"Erreur: la TV a ignore la couleur (style {style!r} demande, {actuel!r} actif)"
+        return f"Ambilight couleur fixe : RVB({r}, {g}, {b})"
+
     def list_apps(self) -> str:
         """Liste les applications disponibles."""
         apps = ["netflix", "youtube", "plex", "disney", "prime"]
@@ -930,6 +1025,22 @@ def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="ambilight_color",
+            annotations=_SET,
+            description="Met l'Ambilight sur une couleur fixe (RVB 0-255), luminosite optionnelle",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "r": {"type": "integer", "minimum": 0, "maximum": 255, "description": "Rouge (0-255)"},
+                    "g": {"type": "integer", "minimum": 0, "maximum": 255, "description": "Vert (0-255)"},
+                    "b": {"type": "integer", "minimum": 0, "maximum": 255, "description": "Bleu (0-255)"},
+                    "brightness": {"type": "integer", "minimum": 0, "maximum": 255,
+                                   "description": "Luminosite (0-255) ; par defaut celle de la couleur"},
+                },
+                "required": ["r", "g", "b"]
+            }
+        ),
+        Tool(
             name="list_apps",
             annotations=_READ,
             description="Liste les applications disponibles sur la TV",
@@ -1024,6 +1135,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "ambilight_mode":
             mode = arguments.get("mode", "follow_video")
             result = tv.ambilight_mode(mode)
+        elif name == "ambilight_color":
+            result = tv.ambilight_color(arguments.get("r"), arguments.get("g"), arguments.get("b"),
+                                        arguments.get("brightness"))
         elif name == "list_apps":
             result = tv.list_apps()
         elif name == "launch_app":

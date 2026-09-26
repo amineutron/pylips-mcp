@@ -30,6 +30,7 @@ Recorded against the real TV with [`docs/demo/record.sh`](docs/demo/record.sh): 
 | `ambilight_on` | Active l'Ambilight de la TV |
 | `ambilight_off` | Desactive l'Ambilight de la TV |
 | `ambilight_mode` | Change le mode Ambilight |
+| `ambilight_color` | Met l'Ambilight sur une couleur fixe (RVB 0-255), luminosite optionnelle |
 | `list_apps` | Liste les applications disponibles sur la TV |
 | `launch_app` | Lance une application sur la TV |
 | `youtube_video` | Lance YouTube sur une video specifique (URL youtube ou ID de video) |

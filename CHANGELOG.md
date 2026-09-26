@@ -2,6 +2,16 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), versions [SemVer](https://semver.org/lang/fr/).
 
+## [0.4.0] - 2026-09-26
+
+### Ajouté
+
+- `ambilight_color` tool: fixed RGB colour (0-255) with optional brightness (#7). The colour style is read from `ambilight/supportedstyles`: the one offering the `MANUAL_HUE` algorithm (`FOLLOW_COLOR` on older sets, `Lounge light` on the 55OLED705). The tool reads the configuration back and reports an error when the TV ignored the request: it answers HTTP 200 either way.
+
+### Connu
+
+- `ambilight_mode(mode="manual")` still targets `FOLLOW_COLOR`, which the 55OLED705 does not have (no effect there). Use `ambilight_color` for a fixed colour.
+
 ## [0.3.0] - 2026-09-25
 
 ### Modifié

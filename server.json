@@ -8,13 +8,13 @@
     "source": "github"
   },
   "websiteUrl": "https://github.com/amineutron/pylips-mcp#readme",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "pylips-mcp",
       "runtimeHint": "uvx",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "transport": {
         "type": "stdio"
       },
