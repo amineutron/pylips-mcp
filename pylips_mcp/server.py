@@ -214,6 +214,36 @@ def extract_video_id(video: str) -> Optional[str]:
     return None
 
 
+# Entrees HDMI de la TV (service MediaTek) : HW5 = HDMI 1 ... HW8 = HDMI 4.
+HDMI_INPUTS = {f"hdmi{n}": f"com.mediatek.tvinput/.hdmi.HDMIInputService/HW{n + 4}" for n in range(1, 5)}
+SOURCES = ("home", *HDMI_INPUTS)
+# Paquet Android -> nom d'application de launch_app
+APP_PACKAGES = {
+    "com.netflix.ninja": "netflix", "com.google.android.youtube.tv": "youtube", "com.plexapp.android": "plex",
+    "com.disney.disneyplus": "disney", "com.amazon.amazonvideo.livingroom": "prime",
+}
+PLAYTV_PACKAGE = "org.droidtv.playtv"       # lecteur des entrees (HDMI, antenne)
+
+
+def describe_activity(current: dict) -> dict:
+    """Ce que la TV affiche, d'apres la reponse JointSpace `activities/current`.
+
+    -> {"kind": "app" | "input" | "home" | "other" | "unknown", "app": nom ou None, "package": paquet}
+    `input` = une entree (HDMI, antenne) ; laquelle n'est pas lisible par cette voie.
+    """
+    composant = current.get("component") if isinstance(current, dict) else None
+    paquet = str((composant or {}).get("packageName") or "")
+    if not paquet:
+        return {"kind": "unknown", "app": None, "package": ""}
+    if paquet in APP_PACKAGES:
+        return {"kind": "app", "app": APP_PACKAGES[paquet], "package": paquet}
+    if paquet == PLAYTV_PACKAGE:
+        return {"kind": "input", "app": None, "package": paquet}
+    if "launcher" in paquet or paquet.endswith(".tvlauncher") or "leanback" in paquet:
+        return {"kind": "home", "app": None, "package": paquet}
+    return {"kind": "other", "app": None, "package": paquet}
+
+
 def send_denon_command(host: str, port: int, command: str, timeout: int = 3) -> str:
     """Envoie une commande au Denon AVR (helper pour redirection HDMI ARC).
 
@@ -759,6 +789,47 @@ class PhilipsTVController:
         apps = ["netflix", "youtube", "plex", "disney", "prime"]
         return f"Applications disponibles: {', '.join(apps)}"
 
+    def current_app(self) -> dict:
+        """Ce que la TV affiche : une application, une entree, le menu d'accueil."""
+        current = self._api_call("activities/current", timeout=4)
+        if "error" in current:
+            return current
+        return describe_activity(current)
+
+    def _adb_run(self, *args: str, timeout: int = 8) -> tuple[bool, str]:
+        """Une commande ADB sur la TV -> (reussie, sortie). Arguments passes tels quels, sans shell local."""
+        import subprocess
+
+        adb_path = "/tmp/platform-tools/adb"
+        if not os.path.exists(adb_path):
+            adb_path = "adb"
+        try:
+            subprocess.run([adb_path, "connect", f"{self.host}:5555"], capture_output=True, timeout=5)
+            result = subprocess.run([adb_path, "-s", f"{self.host}:5555", *args], capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return False, "ADB timeout"
+        except OSError as e:
+            return False, f"ADB indisponible: {e}"
+        sortie = (result.stdout + result.stderr).strip()
+        return result.returncode == 0 and "Error" not in sortie, sortie
+
+    def set_source(self, source: str) -> str:
+        """Passe sur une entree HDMI (hdmi1 a hdmi4) ou revient au menu d'accueil (home)."""
+        import time as _time
+
+        cible = str(source).lower().strip()
+        if cible not in SOURCES:
+            return f"Erreur: source inconnue ({source}). Sources: {', '.join(SOURCES)}"
+        if cible == "home":
+            ok, sortie = self._adb_run("shell", "input", "keyevent", "KEYCODE_HOME")
+            return "Menu d'accueil affiche" if ok else f"Erreur ADB: {sortie}"
+        # si le lecteur des entrees est deja en memoire, `am start` ignore l'entree demandee
+        self._adb_run("shell", "am", "force-stop", PLAYTV_PACKAGE)
+        _time.sleep(0.5)
+        ok, sortie = self._adb_run("shell", "am", "start", "-n", f"{PLAYTV_PACKAGE}/.PlayTvActivity",
+                                   "--es", "inputId", HDMI_INPUTS[cible])
+        return f"Entree {cible.upper()} affichee" if ok else f"Erreur ADB: {sortie}"
+
     def launch_app(self, app: str) -> str:
         """Lance une application."""
         import subprocess
@@ -1084,6 +1155,24 @@ def list_tools() -> list[Tool]:
             inputSchema={"type": "object", "properties": {}, "required": []}
         ),
         Tool(
+            name="current_app",
+            annotations=_READ,
+            description="Retourne ce que la TV affiche : kind (app, input = entree HDMI ou antenne, home, other), app (nom pour launch_app) et package",
+            inputSchema={"type": "object", "properties": {}, "required": []}
+        ),
+        Tool(
+            name="set_source",
+            annotations=_ACTION,
+            description="Passe la TV sur une entree HDMI (hdmi1 a hdmi4) ou revient au menu d'accueil (home)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string", "enum": list(SOURCES), "description": "Entree a afficher"}
+                },
+                "required": ["source"]
+            }
+        ),
+        Tool(
             name="send_key",
             annotations=_ACTION,
             description="Envoie une touche de telecommande",
@@ -1149,6 +1238,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "get_state":
             state = tv.get_state()
             result = json.dumps(state, indent=2)
+        elif name == "current_app":
+            result = json.dumps(tv.current_app(), indent=2)
+        elif name == "set_source":
+            result = tv.set_source(arguments.get("source", ""))
         elif name == "send_key":
             key = arguments.get("key", "")
             result = tv.send_key(key)
