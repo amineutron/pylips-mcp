@@ -35,6 +35,8 @@ Recorded against the real TV with [`docs/demo/record.sh`](docs/demo/record.sh): 
 | `launch_app` | Lance une application sur la TV |
 | `youtube_video` | Lance YouTube sur une video specifique (URL youtube ou ID de video) |
 | `get_state` | Retourne l'etat actuel de la TV : powerstate (On/Standby), volume, muted, ambilight_on, ambilight_mode |
+| `current_app` | Retourne ce que la TV affiche : kind (app, input = entree HDMI ou antenne, home, other), app (nom pour launch_app) et package |
+| `set_source` | Passe la TV sur une entree HDMI (hdmi1 a hdmi4) ou revient au menu d'accueil (home) |
 | `send_key` | Envoie une touche de telecommande |
 <!-- tools:end -->
 
