@@ -2,6 +2,12 @@
 
 Format : [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), versions [SemVer](https://semver.org/lang/fr/).
 
+## [Unreleased]
+
+### Ajouté
+
+- `ambilight_stream_start`, `ambilight_stream_level`, `ambilight_stream_stop` tools: fast Ambilight colour stream (about 10 calls/s) without read-back. Two lanes: `cached` (`ambilight/cached` after switching to `manual` mode) and `lounge` (`currentconfiguration`). The initial mode and configuration are snapshotted and restored by stop; an Ambilight that is off is never turned on. A server-side daemon timer (`STREAM_WATCHDOG_S` = 15) restores the state when no `ambilight_stream_level` call arrives.
+
 ## [0.4.0] - 2026-09-26
 
 ### Ajouté
