@@ -24,6 +24,7 @@ import os
 import re
 import ssl
 import sys
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -305,6 +306,10 @@ def rgb_to_ambilight_color(r: int, g: int, b: int, brightness: int | None = None
 COLOR_ALGORITHM = "MANUAL_HUE"
 DEFAULT_COLOR_STYLE = "Lounge light"
 
+# Flux Ambilight : sans appel ambilight_stream_level pendant ce delai, l'etat d'origine est restaure.
+STREAM_WATCHDOG_S = 15
+STREAM_LANES = ("cached", "lounge")
+
 
 def color_style_from_supported(supported: dict) -> str | None:
     """Nom du style qui propose l'algorithme MANUAL_HUE dans ambilight/supportedstyles.
@@ -358,6 +363,9 @@ class PhilipsTVController:
         self.mac = mac  # MAC address pour Wake-on-LAN
         self._screen_muted = False  # Etat du mute ecran (toggle local)
         self._color_style_cache: str | None = None  # style couleur fixe propre au modele
+        self._stream_lock = threading.RLock()
+        self._stream: dict | None = None  # {"lane", "snapshot", "style", "timer"} tant qu'un flux est actif
+        self._timer_factory = threading.Timer  # injectable pour les tests
         self._session = _build_tv_session()  # Session HTTP avec cert TP Vision
 
     def _api_call(self, endpoint: str, method: str = "GET", body: dict = None,
@@ -784,6 +792,90 @@ class PhilipsTVController:
             return f"Erreur: la TV a ignore la couleur (style {style!r} demande, {actuel!r} actif)"
         return f"Ambilight couleur fixe : RVB({r}, {g}, {b})"
 
+    def _stream_arm(self) -> None:
+        """(Re)arme le minuteur de securite ; appelee avec le verrou pris."""
+        old = self._stream.get("timer")
+        if old is not None:
+            old.cancel()
+        timer = self._timer_factory(STREAM_WATCHDOG_S, self.ambilight_stream_stop)
+        timer.daemon = True
+        self._stream["timer"] = timer
+        timer.start()
+
+    def ambilight_stream_start(self, voie: str) -> str:
+        """Demarre un flux Ambilight : releve l'etat d'origine, ne rallume jamais l'Ambilight."""
+        if voie not in STREAM_LANES:
+            return f"Erreur: voie inconnue {voie!r} (cached ou lounge)"
+        with self._stream_lock:
+            if self._stream is not None:  # deja demarre : on change de voie, instantane conserve
+                snapshot = self._stream["snapshot"]
+            else:
+                power = self._api_call("ambilight/power", timeout=3)
+                if "error" in power:
+                    return f"Erreur: {power['error']}"
+                if power.get("power") != "On":
+                    return "Erreur: Ambilight eteint, flux non demarre"
+                mode = self._api_call("ambilight/mode", timeout=3)
+                config = self._api_call("ambilight/currentconfiguration", timeout=3)
+                snapshot = {
+                    "mode": mode.get("current") if isinstance(mode, dict) and "error" not in mode else None,
+                    "config": config if isinstance(config, dict) and "error" not in config else None,
+                }
+            if voie == "cached":
+                result = self._api_call("ambilight/mode", "POST", {"current": "manual"})
+                if "error" in result:
+                    return f"Erreur: {result['error']}"
+                style = None
+            else:
+                style = self._color_style()
+                if not style:
+                    return "Erreur: aucun style Ambilight pour une couleur fixe"
+            self._stream = {"lane": voie, "snapshot": snapshot, "style": style,
+                            "timer": (self._stream or {}).get("timer")}
+            self._stream_arm()
+        return f"OK flux Ambilight demarre (voie {voie})"
+
+    def ambilight_stream_level(self, r: int, g: int, b: int) -> str:
+        """Une couleur du flux, sans relecture. Rearme le minuteur de securite."""
+        for v in (r, g, b):
+            if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 255:
+                return "Erreur: r, g, b doivent etre des entiers entre 0 et 255"
+        with self._stream_lock:
+            if self._stream is None:
+                return "Erreur: flux Ambilight non demarre"
+            lane, style = self._stream["lane"], self._stream["style"]
+            self._stream_arm()
+        if lane == "cached":
+            result = self._api_call("ambilight/cached", "POST", {"r": r, "g": g, "b": b}, timeout=2)
+        else:
+            result = self._api_call("ambilight/currentconfiguration", "POST",
+                                    ambilight_color_body(r, g, b, None, style), timeout=2)
+        if "error" in result:
+            return f"Erreur: {result['error']}"
+        return "OK"
+
+    def ambilight_stream_stop(self) -> str:
+        """Arrete le flux et restaure l'instantane d'origine. Idempotent."""
+        with self._stream_lock:
+            stream, self._stream = self._stream, None
+            if stream is None:
+                return "OK aucun flux a arreter"
+            if stream.get("timer") is not None:
+                stream["timer"].cancel()
+            snapshot = stream["snapshot"]
+            errors = []
+            if snapshot["mode"]:
+                res = self._api_call("ambilight/mode", "POST", {"current": snapshot["mode"]})
+                if "error" in res:
+                    errors.append(res["error"])
+            if snapshot["config"]:
+                res = self._api_call("ambilight/currentconfiguration", "POST", snapshot["config"])
+                if "error" in res:
+                    errors.append(res["error"])
+        if errors:
+            return f"Erreur: restauration incomplete ({'; '.join(errors)})"
+        return "OK flux Ambilight arrete, etat restaure"
+
     def list_apps(self) -> str:
         """Liste les applications disponibles."""
         apps = ["netflix", "youtube", "plex", "disney", "prime"]
@@ -1112,6 +1204,39 @@ def list_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="ambilight_stream_start",
+            annotations=_SET,
+            description="Demarre un flux Ambilight rapide (releve l'etat d'origine, ne rallume pas un Ambilight eteint). Restauration automatique apres 15 s sans ambilight_stream_level",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "voie": {"type": "string", "enum": ["cached", "lounge"],
+                             "description": "cached : ambilight/cached en mode manual ; lounge : configuration Lounge light"},
+                },
+                "required": ["voie"]
+            }
+        ),
+        Tool(
+            name="ambilight_stream_level",
+            annotations=_SET,
+            description="Envoie une couleur RVB au flux Ambilight demarre (sans relecture, ~10 appels/s)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "r": {"type": "integer", "minimum": 0, "maximum": 255, "description": "Rouge (0-255)"},
+                    "g": {"type": "integer", "minimum": 0, "maximum": 255, "description": "Vert (0-255)"},
+                    "b": {"type": "integer", "minimum": 0, "maximum": 255, "description": "Bleu (0-255)"},
+                },
+                "required": ["r", "g", "b"]
+            }
+        ),
+        Tool(
+            name="ambilight_stream_stop",
+            annotations=_SET,
+            description="Arrete le flux Ambilight et restaure le mode et la configuration d'origine (idempotent)",
+            inputSchema={"type": "object", "properties": {}, "required": []}
+        ),
+        Tool(
             name="list_apps",
             annotations=_READ,
             description="Liste les applications disponibles sur la TV",
@@ -1227,6 +1352,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "ambilight_color":
             result = tv.ambilight_color(arguments.get("r"), arguments.get("g"), arguments.get("b"),
                                         arguments.get("brightness"))
+        elif name == "ambilight_stream_start":
+            result = tv.ambilight_stream_start(arguments.get("voie"))
+        elif name == "ambilight_stream_level":
+            result = tv.ambilight_stream_level(arguments.get("r"), arguments.get("g"), arguments.get("b"))
+        elif name == "ambilight_stream_stop":
+            result = tv.ambilight_stream_stop()
         elif name == "list_apps":
             result = tv.list_apps()
         elif name == "launch_app":
