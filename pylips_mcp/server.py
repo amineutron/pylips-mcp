@@ -882,7 +882,7 @@ class PhilipsTVController:
         timer.start()
 
     def ambilight_stream_start(self, voie: str) -> str:
-        """Demarre un flux Ambilight : releve l'etat d'origine, ne rallume jamais l'Ambilight."""
+        """Demarre un flux Ambilight : releve l'etat d'origine (allume l'Ambilight s'il etait eteint, l'arret le re-eteint)."""
         if voie not in STREAM_LANES:
             return f"Erreur: voie inconnue {voie!r} (cached ou lounge)"
         with self._stream_lock:
@@ -892,11 +892,15 @@ class PhilipsTVController:
                 power = self._api_call("ambilight/power", timeout=3)
                 if "error" in power:
                     return f"Erreur: {power['error']}"
-                if power.get("power") != "On":
-                    return "Erreur: Ambilight eteint, flux non demarre"
+                was_on = power.get("power") == "On"
                 mode = self._api_call("ambilight/mode", timeout=3)
                 config = self._api_call("ambilight/currentconfiguration", timeout=3)
+                if not was_on:  # eteint : on l'allume pour le flux, et l'arret le re-eteint
+                    res = self._api_call("ambilight/power", "POST", {"power": "On"}, timeout=5)
+                    if "error" in res:
+                        return f"Erreur: {res['error']}"
                 snapshot = {
+                    "was_on": was_on,
                     "mode": mode.get("current") if isinstance(mode, dict) and "error" not in mode else None,
                     "config": config if isinstance(config, dict) and "error" not in config else None,
                 }
@@ -947,8 +951,12 @@ class PhilipsTVController:
                 res = self._api_call("ambilight/mode", "POST", {"current": snapshot["mode"]})
                 if "error" in res:
                     errors.append(res["error"])
-            if snapshot["config"]:
+            if snapshot["config"] and snapshot["was_on"]:
                 res = self._api_call("ambilight/currentconfiguration", "POST", snapshot["config"])
+                if "error" in res:
+                    errors.append(res["error"])
+            if not snapshot["was_on"]:  # il etait eteint avant le flux : on le laisse eteint
+                res = self._api_call("ambilight/power", "POST", {"power": "Off"}, timeout=5)
                 if "error" in res:
                     errors.append(res["error"])
         if errors:
@@ -1285,7 +1293,7 @@ def list_tools() -> list[Tool]:
         Tool(
             name="ambilight_stream_start",
             annotations=_SET,
-            description="Demarre un flux Ambilight rapide (releve l'etat d'origine, ne rallume pas un Ambilight eteint). Restauration automatique apres 15 s sans ambilight_stream_level",
+            description="Demarre un flux Ambilight rapide (releve l'etat d'origine ; allume un Ambilight eteint et le re-eteint a l'arret). Restauration automatique apres 15 s sans ambilight_stream_level",
             inputSchema={
                 "type": "object",
                 "properties": {

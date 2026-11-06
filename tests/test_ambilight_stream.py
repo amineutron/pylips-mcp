@@ -73,10 +73,46 @@ def test_start_lounge_ne_change_pas_le_mode(make_tv):
     assert api.posts() == []
 
 
-def test_start_refuse_si_eteint(make_tv):
+def test_start_allume_un_ambilight_eteint(make_tv):
     tv, api = make_tv(power="Off")
+    assert tv.ambilight_stream_start("cached").startswith("OK")
+    assert api.posts() == [("ambilight/power", {"power": "On"}), ("ambilight/mode", {"current": "manual"})]
+    assert tv.ambilight_stream_level(1, 2, 3) == "OK"
+
+
+def test_stop_eteint_de_nouveau_ce_qui_etait_eteint(make_tv):
+    tv, api = make_tv(power="Off")
+    tv.ambilight_stream_start("cached")
+    api.calls.clear()
+    assert tv.ambilight_stream_stop().startswith("OK")
+    posts = api.posts()
+    assert posts[0] == ("ambilight/mode", {"current": "internal"})
+    assert posts[-1] == ("ambilight/power", {"power": "Off"})
+    assert ("ambilight/currentconfiguration", OLD_CONFIG) not in posts
+
+
+def test_watchdog_eteint_aussi_ce_qui_etait_eteint(make_tv):
+    tv, api = make_tv(power="Off")
+    tv.ambilight_stream_start("lounge")
+    api.calls.clear()
+    FakeTimer.instances[-1].fire()
+    assert api.posts()[-1] == ("ambilight/power", {"power": "Off"})
+
+
+def test_stop_ne_coupe_pas_un_ambilight_qui_etait_allume(make_tv):
+    tv, api = make_tv(power="On")
+    tv.ambilight_stream_start("cached")
+    api.calls.clear()
+    tv.ambilight_stream_stop()
+    assert ("ambilight/power", {"power": "Off"}) not in api.posts()
+
+
+def test_start_echec_allumage_ne_demarre_rien(make_tv, monkeypatch):
+    tv, api = make_tv(power="Off")
+    reel = api.__call__
+    monkeypatch.setattr(tv, "_api_call", lambda e, m="GET", b=None, **kw:
+                        {"error": "refuse"} if (e, m) == ("ambilight/power", "POST") else reel(e, m, b, **kw))
     assert tv.ambilight_stream_start("cached").startswith("Erreur")
-    assert api.posts() == []
     assert tv.ambilight_stream_level(1, 2, 3) == "Erreur: flux Ambilight non demarre"
 
 
