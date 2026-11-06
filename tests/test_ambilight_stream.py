@@ -31,13 +31,20 @@ class FakeTimer:
 
 
 class FakeAPI:
-    def __init__(self, power="On", mode="internal", config=OLD_CONFIG):
+    def __init__(self, power="On", mode="internal", config=OLD_CONFIG, ignore_mode_posts=0):
+        self.ignore_mode_posts = ignore_mode_posts
+        self.sleeps = []
         self.state = {"ambilight/power": {"power": power}, "ambilight/mode": {"current": mode},
                       "ambilight/currentconfiguration": config, "ambilight/supportedstyles": SUPPORTED}
         self.calls = []
 
     def __call__(self, endpoint, method="GET", body=None, **kw):
         self.calls.append((endpoint, method, body, kw.get("timeout")))
+        if method == "POST" and endpoint == "ambilight/mode":
+            if self.ignore_mode_posts > 0:
+                self.ignore_mode_posts -= 1
+            else:
+                self.state["ambilight/mode"] = {"current": body["current"]}
         return self.state.get(endpoint, {}) if method == "GET" else {"status": "ok"}
 
     def posts(self):
@@ -53,6 +60,7 @@ def make_tv(monkeypatch):
         tv = server.PhilipsTVController("192.0.2.10", "u", "p")
         monkeypatch.setattr(tv, "_api_call", api)
         monkeypatch.setattr(tv, "_timer_factory", FakeTimer)
+        monkeypatch.setattr(tv, "_sleep", lambda s: api.sleeps.append(s))
         return tv, api
     return build
 
@@ -226,3 +234,23 @@ def test_outils_declares():
     assert tools["ambilight_stream_start"].model_dump(by_alias=True)["inputSchema"]["required"] == ["voie"]
     assert tools["ambilight_stream_level"].model_dump(by_alias=True)["inputSchema"]["required"] == ["r", "g", "b"]
     assert tools["ambilight_stream_stop"].model_dump(by_alias=True)["inputSchema"]["required"] == []
+
+
+def test_start_cached_reessaie_quand_la_tv_ignore_le_mode_manuel(make_tv):
+    tv, api = make_tv(ignore_mode_posts=2)
+    assert tv.ambilight_stream_start("cached").startswith("OK")
+    assert [b for e, b in api.posts() if e == "ambilight/mode"] == [{"current": "manual"}] * 3
+    assert api.state["ambilight/mode"] == {"current": "manual"}
+    assert api.sleeps
+
+
+def test_start_cached_echoue_si_la_tv_reste_hors_mode_manuel(make_tv):
+    tv, api = make_tv(ignore_mode_posts=99)
+    assert tv.ambilight_stream_start("cached").startswith("Erreur")
+    assert tv.ambilight_stream_level(1, 2, 3) == "Erreur: flux Ambilight non demarre"
+
+
+def test_start_ambilight_eteint_attend_avant_le_mode_manuel(make_tv):
+    tv, api = make_tv(power="Off")
+    tv.ambilight_stream_start("cached")
+    assert api.sleeps and api.sleeps[0] >= 0.5

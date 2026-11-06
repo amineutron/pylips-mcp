@@ -25,6 +25,7 @@ import re
 import ssl
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -308,6 +309,9 @@ DEFAULT_COLOR_STYLE = "Lounge light"
 
 # Flux Ambilight : sans appel ambilight_stream_level pendant ce delai, l'etat d'origine est restaure.
 STREAM_WATCHDOG_S = 15
+POWER_ON_SETTLE_S = 0.8   # apres l'allumage, la TV ignore un changement de mode trop rapide
+MODE_TRIES = 3
+MODE_RETRY_S = 0.5
 STREAM_LANES = ("cached", "lounge")
 
 
@@ -371,6 +375,7 @@ class PhilipsTVController:
         self._stream_lock = threading.RLock()
         self._stream: dict | None = None  # {"lane", "snapshot", "style", "timer"} tant qu'un flux est actif
         self._timer_factory = threading.Timer  # injectable pour les tests
+        self._sleep = time.sleep               # idem
         self._session = _build_tv_session()  # Session HTTP avec cert TP Vision
 
     def _api_call(self, endpoint: str, method: str = "GET", body: dict = None,
@@ -881,11 +886,41 @@ class PhilipsTVController:
         self._stream["timer"] = timer
         timer.start()
 
+    def _set_manual_mode(self) -> bool:
+        """Passe l'Ambilight en mode manuel et le verifie par relecture (la TV repond 200 meme quand elle ignore)."""
+        for attempt in range(MODE_TRIES):
+            result = self._api_call("ambilight/mode", "POST", {"current": "manual"})
+            if "error" not in result:
+                mode = self._api_call("ambilight/mode", timeout=3)
+                if isinstance(mode, dict) and mode.get("current") == "manual":
+                    return True
+            if attempt < MODE_TRIES - 1:
+                self._sleep(MODE_RETRY_S)
+        return False
+
+    def _stream_restore(self, snapshot: dict) -> list:
+        """Remet l'etat releve au demarrage ; rend les erreurs rencontrees."""
+        errors = []
+        if snapshot["mode"]:
+            res = self._api_call("ambilight/mode", "POST", {"current": snapshot["mode"]})
+            if "error" in res:
+                errors.append(res["error"])
+        if snapshot["config"] and snapshot["was_on"]:
+            res = self._api_call("ambilight/currentconfiguration", "POST", snapshot["config"])
+            if "error" in res:
+                errors.append(res["error"])
+        if not snapshot["was_on"]:  # il etait eteint avant le flux : on le laisse eteint
+            res = self._api_call("ambilight/power", "POST", {"power": "Off"}, timeout=5)
+            if "error" in res:
+                errors.append(res["error"])
+        return errors
+
     def ambilight_stream_start(self, voie: str) -> str:
         """Demarre un flux Ambilight : releve l'etat d'origine (allume l'Ambilight s'il etait eteint, l'arret le re-eteint)."""
         if voie not in STREAM_LANES:
             return f"Erreur: voie inconnue {voie!r} (cached ou lounge)"
         with self._stream_lock:
+            just_powered = False
             if self._stream is not None:  # deja demarre : on change de voie, instantane conserve
                 snapshot = self._stream["snapshot"]
             else:
@@ -899,15 +934,18 @@ class PhilipsTVController:
                     res = self._api_call("ambilight/power", "POST", {"power": "On"}, timeout=5)
                     if "error" in res:
                         return f"Erreur: {res['error']}"
+                    just_powered = True
                 snapshot = {
                     "was_on": was_on,
                     "mode": mode.get("current") if isinstance(mode, dict) and "error" not in mode else None,
                     "config": config if isinstance(config, dict) and "error" not in config else None,
                 }
             if voie == "cached":
-                result = self._api_call("ambilight/mode", "POST", {"current": "manual"})
-                if "error" in result:
-                    return f"Erreur: {result['error']}"
+                if just_powered:
+                    self._sleep(POWER_ON_SETTLE_S)
+                if not self._set_manual_mode():
+                    errors = self._stream_restore(snapshot) if just_powered else []
+                    return "Erreur: la TV n'a pas passe l'Ambilight en mode manuel" + (f" (restauration: {'; '.join(errors)})" if errors else "")
                 style = None
             else:
                 style = self._color_style()
@@ -945,20 +983,7 @@ class PhilipsTVController:
                 return "OK aucun flux a arreter"
             if stream.get("timer") is not None:
                 stream["timer"].cancel()
-            snapshot = stream["snapshot"]
-            errors = []
-            if snapshot["mode"]:
-                res = self._api_call("ambilight/mode", "POST", {"current": snapshot["mode"]})
-                if "error" in res:
-                    errors.append(res["error"])
-            if snapshot["config"] and snapshot["was_on"]:
-                res = self._api_call("ambilight/currentconfiguration", "POST", snapshot["config"])
-                if "error" in res:
-                    errors.append(res["error"])
-            if not snapshot["was_on"]:  # il etait eteint avant le flux : on le laisse eteint
-                res = self._api_call("ambilight/power", "POST", {"power": "Off"}, timeout=5)
-                if "error" in res:
-                    errors.append(res["error"])
+            errors = self._stream_restore(stream["snapshot"])
         if errors:
             return f"Erreur: restauration incomplete ({'; '.join(errors)})"
         return "OK flux Ambilight arrete, etat restaure"
