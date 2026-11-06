@@ -649,6 +649,8 @@ class PhilipsTVController:
         audio = self._api_call("audio/volume", timeout=3)
         ambi = self._api_call("ambilight/currentconfiguration", timeout=3)
         power = self._api_call("ambilight/power", timeout=3)
+        screen = self._api_call("screenstate", timeout=3)
+        state["screen"] = screen.get("screenstate") if "error" not in screen else None
         state["volume"] = audio.get("current") if "error" not in audio else None
         state["muted"] = bool(audio.get("muted")) if "error" not in audio else None
         state["ambilight_on"] = (power.get("power") == "On") if "error" not in power else None
