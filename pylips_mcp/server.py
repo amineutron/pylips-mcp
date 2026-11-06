@@ -309,9 +309,7 @@ DEFAULT_COLOR_STYLE = "Lounge light"
 
 # Flux Ambilight : sans appel ambilight_stream_level pendant ce delai, l'etat d'origine est restaure.
 STREAM_WATCHDOG_S = 15
-POWER_ON_SETTLE_S = 0.8   # apres l'allumage, la TV ignore un changement de mode trop rapide
-MODE_TRIES = 3
-MODE_RETRY_S = 0.5
+POWER_ON_SETTLE_S = 0.8   # apres l'allumage, on laisse la TV se poser avant de changer de mode
 STREAM_LANES = ("cached", "lounge")
 
 
@@ -887,16 +885,9 @@ class PhilipsTVController:
         timer.start()
 
     def _set_manual_mode(self) -> bool:
-        """Passe l'Ambilight en mode manuel et le verifie par relecture (la TV repond 200 meme quand elle ignore)."""
-        for attempt in range(MODE_TRIES):
-            result = self._api_call("ambilight/mode", "POST", {"current": "manual"})
-            if "error" not in result:
-                mode = self._api_call("ambilight/mode", timeout=3)
-                if isinstance(mode, dict) and mode.get("current") == "manual":
-                    return True
-            if attempt < MODE_TRIES - 1:
-                self._sleep(MODE_RETRY_S)
-        return False
+        """Passe l'Ambilight en mode manuel. Pas de relecture : la TV rapporte « internal » meme quand le cache s'affiche
+        (verifie a l'ecran), donc relire le mode ferait echouer un flux qui marche."""
+        return "error" not in self._api_call("ambilight/mode", "POST", {"current": "manual"})
 
     def _stream_restore(self, snapshot: dict) -> list:
         """Remet l'etat releve au demarrage ; rend les erreurs rencontrees."""
@@ -945,7 +936,7 @@ class PhilipsTVController:
                     self._sleep(POWER_ON_SETTLE_S)
                 if not self._set_manual_mode():
                     errors = self._stream_restore(snapshot) if just_powered else []
-                    return "Erreur: la TV n'a pas passe l'Ambilight en mode manuel" + (f" (restauration: {'; '.join(errors)})" if errors else "")
+                    return "Erreur: la TV a refuse le mode manuel" + (f" (restauration: {'; '.join(errors)})" if errors else "")
                 style = None
             else:
                 style = self._color_style()

@@ -236,16 +236,18 @@ def test_outils_declares():
     assert tools["ambilight_stream_stop"].model_dump(by_alias=True)["inputSchema"]["required"] == []
 
 
-def test_start_cached_reessaie_quand_la_tv_ignore_le_mode_manuel(make_tv):
-    tv, api = make_tv(ignore_mode_posts=2)
-    assert tv.ambilight_stream_start("cached").startswith("OK")
-    assert [b for e, b in api.posts() if e == "ambilight/mode"] == [{"current": "manual"}] * 3
-    assert api.state["ambilight/mode"] == {"current": "manual"}
-    assert api.sleeps
-
-
-def test_start_cached_echoue_si_la_tv_reste_hors_mode_manuel(make_tv):
+def test_start_cached_ne_relit_pas_le_mode(make_tv):
+    # la TV rapporte « internal » meme quand le cache s'affiche : un flux ne doit pas echouer sur cette relecture
     tv, api = make_tv(ignore_mode_posts=99)
+    assert tv.ambilight_stream_start("cached").startswith("OK")
+    assert [c for c in api.calls if c[0] == "ambilight/mode" and c[1] == "GET"] == [("ambilight/mode", "GET", None, 3)]
+
+
+def test_start_cached_echoue_si_la_tv_refuse_le_mode(make_tv, monkeypatch):
+    tv, api = make_tv()
+    reel = api.__call__
+    monkeypatch.setattr(tv, "_api_call", lambda e, m="GET", b=None, **kw:
+                        {"error": "refuse"} if (e, m) == ("ambilight/mode", "POST") else reel(e, m, b, **kw))
     assert tv.ambilight_stream_start("cached").startswith("Erreur")
     assert tv.ambilight_stream_level(1, 2, 3) == "Erreur: flux Ambilight non demarre"
 
