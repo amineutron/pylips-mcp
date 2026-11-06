@@ -346,6 +346,10 @@ def color_applied(config: dict, style: str) -> bool:
     return algo == COLOR_ALGORITHM
 
 
+HOST_RECOVER_COOLDOWN = 20.0
+HOST_LOCATOR = Path.home() / "dev/ricing/scripts/quickshell/music/device_locator.py"
+
+
 class PhilipsTVController:
     """Controleur pour TV Philips (API JointSpace v6, appels HTTPS directs)."""
 
@@ -356,6 +360,7 @@ class PhilipsTVController:
         self.denon_host = denon_host
         self.denon_port = denon_port
         self.mac = mac  # MAC address pour Wake-on-LAN
+        self._last_recover: dict[str, float] = {}  # derniere recherche par appareil (IP changee)
         self._screen_muted = False  # Etat du mute ecran (toggle local)
         self._color_style_cache: str | None = None  # style couleur fixe propre au modele
         self._session = _build_tv_session()  # Session HTTP avec cert TP Vision
@@ -375,22 +380,83 @@ class PhilipsTVController:
         t = (connect_timeout if connect_timeout else timeout, timeout)
 
         try:
-            # verify=False desactive seulement la verification par autorite de requests
-            # (impossible : chaine SHA1). L'authenticite est garantie par l'empreinte
-            # epinglee dans l'adaptateur HTTPS de la session (voir _build_tv_session).
-            if method == "GET":
-                response = self._session.get(url, auth=auth, verify=False, timeout=t)
-            else:
-                response = self._session.post(url, auth=auth, json=body, verify=False, timeout=t)
-
-            if response.status_code == 200:
-                return response.json() if response.text else {"status": "ok"}
-            else:
-                return {"error": f"HTTP {response.status_code}"}
+            return self._send(url, method, body, auth, t)
         except requests.exceptions.Timeout:
             return {"error": "Timeout - TV may be off"}
+        except requests.exceptions.ConnectionError as e:
+            # Hote introuvable : l'IP a pu changer (DHCP) depuis le demarrage.
+            # Une seule reparation par appel, puis on rejoue sur la nouvelle adresse.
+            if self._recover_host():
+                url = f"https://{self.host}:1926/6/{endpoint}"
+                try:
+                    return self._send(url, method, body, auth, t)
+                except Exception as e2:
+                    return {"error": str(e2)}
+            return {"error": str(e)}
         except Exception as e:
             return {"error": str(e)}
+
+    def _send(self, url: str, method: str, body, auth, t):
+        # verify=False desactive seulement la verification par autorite de requests
+        # (impossible : chaine SHA1). L'authenticite est garantie par l'empreinte
+        # epinglee dans l'adaptateur HTTPS de la session (voir _build_tv_session).
+        if method == "GET":
+            response = self._session.get(url, auth=auth, verify=False, timeout=t)
+        else:
+            response = self._session.post(url, auth=auth, json=body, verify=False, timeout=t)
+        if response.status_code == 200:
+            return response.json() if response.text else {"status": "ok"}
+        return {"error": f"HTTP {response.status_code}"}
+
+    def _denon(self, command: str) -> str:
+        """Commande Denon ; si l'ampli est introuvable, cherche sa nouvelle IP et rejoue."""
+        reponse = send_denon_command(self.denon_host, self.denon_port, command)
+        if reponse.startswith("ERROR") and "not configured" not in reponse and self._recover_host("denon"):
+            reponse = send_denon_command(self.denon_host, self.denon_port, command)
+        return reponse
+
+    def _recover_host(self, device: str = "tv") -> bool:
+        """Retrouve un appareil dont l'IP a change. True si son hote a ete mis a jour.
+
+        device = "tv" (self.host) ou "denon" (self.denon_host).
+        1. relire la config (le localisateur, le hub ou un humain l'a peut-etre corrigee)
+        2. lancer le localisateur (voisinage ARP par MAC, puis balayage du /24), relire
+        Espace de 20 s entre deux tentatives par appareil : un appareil simplement
+        eteint ne declenche pas un balayage a chaque commande.
+        """
+        import subprocess
+        import time as _time
+
+        now = _time.monotonic()
+        if now - self._last_recover.get(device, -HOST_RECOVER_COOLDOWN) < HOST_RECOVER_COOLDOWN:
+            return False
+        self._last_recover[device] = now
+        attr = "host" if device == "tv" else "denon_host"
+
+        def relire() -> bool:
+            try:
+                nouveau = load_config()[device]["host"]
+            except Exception:
+                return False
+            ancien = getattr(self, attr)
+            if nouveau and nouveau != ancien:
+                print(f"pylips-mcp: {device} deplace {ancien} -> {nouveau}", file=sys.stderr)
+                setattr(self, attr, nouveau)
+                return True
+            return False
+
+        if relire():
+            return True
+        locator = Path(os.environ.get("DEVICE_LOCATOR", HOST_LOCATOR))
+        if not locator.exists():
+            return False
+        try:
+            subprocess.run([sys.executable, str(locator), "heal", device],
+                           capture_output=True, timeout=40, check=False)
+        except Exception as e:
+            print(f"pylips-mcp: localisateur en echec: {e}", file=sys.stderr)
+            return False
+        return relire()
 
     def power_on(self) -> str:
         """Allume la TV — sequence complete, auto-suffisante et verifiee.
@@ -415,6 +481,17 @@ class PhilipsTVController:
             self._send_wol()
             via_wol = True
             state = self._wait_reachable(deadline_s=25.0)
+            if state is None:
+                # Android peut etre reveille (ADB repond) sans que JointSpace
+                # ecoute : l'ecran reste « Asleep ». On le reveille par ADB.
+                adb_ok, _ = self._adb_run("shell", "input", "keyevent", "KEYCODE_WAKEUP")
+                if adb_ok:
+                    state = self._wait_reachable(deadline_s=20.0)
+                    if state is None:
+                        raise RuntimeError(
+                            "Wake-on-LAN envoye et ecran reveille par ADB, mais l'API "
+                            "JointSpace de la TV (port 1926) ne repond pas — "
+                            "service fige ou encore en demarrage")
             if state is None:
                 raise RuntimeError(
                     "Wake-on-LAN envoye mais la TV ne repond pas apres 25s — "
@@ -528,32 +605,34 @@ class PhilipsTVController:
             return False
 
     def screen_off(self) -> str:
-        """Eteint l'ecran tout en gardant le son (mode musique).
+        """Eteint le panneau et l'ambilight, son et reseau conserves (mode musique).
 
-        Strategie:
-        1. JointSpace MAIN_MUTE_SCREEN (fonctionne sur source HDMI/TV)
-        2. Screensaver Philips via ADB (DreamerService) en fallback Android
+        JointSpace `screenstate` coupe le panneau sur toutes les sources, Android
+        compris. L'ancien MAIN_MUTE_SCREEN + screensaver n'eteignait rien sur le
+        launcher Android (constate le 2026-10-31).
         """
-        if self._screen_muted:
-            return "Ecran deja eteint (son actif)"
-
-        # Tentative 1: JointSpace MUTE_SCREEN
-        self._toggle_screen_mute()
+        res = self._api_call("screenstate", "POST", {"screenstate": "Off"}, timeout=8)
+        if "error" in res:
+            raise RuntimeError(f"Ecran non eteint: {res['error']}")
+        self._ambi_avant = {
+            "power": self._api_call("ambilight/power", timeout=3),
+            "config": self._api_call("ambilight/currentconfiguration", timeout=3),
+        }
+        self._api_call("ambilight/power", "POST", {"power": "Off"}, timeout=5)
         self._screen_muted = True
-
-        # Tentative 2: Screensaver Philips via ADB
-        self._adb_screensaver()
-
-        return ("Commande ecran eteint envoyee. "
-                "Si l ecran est toujours allume, ce mode ne fonctionne "
-                "qu en source HDMI/TV (pas sur le launcher Android).")
+        return "Ecran eteint (son actif)"
 
     def screen_on(self) -> str:
-        """Rallume l'ecran (apres screen_off)."""
-        # Toujours tenter le toggle (si l'ecran etait mute via JointSpace)
-        self._toggle_screen_mute()
-        # Touche Info pour sortir du screensaver
-        self._api_call("input/key", "POST", {"key": "Info"}, timeout=5)
+        """Rallume le panneau et restaure l'ambilight d'avant l'extinction."""
+        res = self._api_call("screenstate", "POST", {"screenstate": "On"}, timeout=8)
+        if "error" in res:
+            raise RuntimeError(f"Ecran non rallume: {res['error']}")
+        avant = getattr(self, "_ambi_avant", None) or {}
+        if avant.get("power", {}).get("power") == "On":
+            cfg = avant.get("config") or {}
+            if cfg and "error" not in cfg:
+                self._api_call("ambilight/currentconfiguration", "POST", cfg, timeout=5)
+            self._api_call("ambilight/power", "POST", {"power": "On"}, timeout=5)
         self._screen_muted = False
         return "Ecran rallume"
 
@@ -570,6 +649,8 @@ class PhilipsTVController:
         audio = self._api_call("audio/volume", timeout=3)
         ambi = self._api_call("ambilight/currentconfiguration", timeout=3)
         power = self._api_call("ambilight/power", timeout=3)
+        screen = self._api_call("screenstate", timeout=3)
+        state["screen"] = screen.get("screenstate") if "error" not in screen else None
         state["volume"] = audio.get("current") if "error" not in audio else None
         state["muted"] = bool(audio.get("muted")) if "error" not in audio else None
         state["ambilight_on"] = (power.get("power") == "On") if "error" not in power else None
@@ -584,11 +665,11 @@ class PhilipsTVController:
         # Redirection HDMI ARC -> Denon
         if self.denon_host:
             for _ in range(step):
-                send_denon_command(self.denon_host, self.denon_port, "MVUP")
+                self._denon("MVUP")
             import time
             time.sleep(0.3)
             # Lire le volume Denon
-            response = send_denon_command(self.denon_host, self.denon_port, "MV?")
+            response = self._denon("MV?")
             if "MV" in response and "ERROR" not in response:
                 for line in response.split('\r'):
                     if line.startswith('MV') and not line.startswith('MVMAX'):
@@ -620,11 +701,11 @@ class PhilipsTVController:
         # Redirection HDMI ARC -> Denon
         if self.denon_host:
             for _ in range(step):
-                send_denon_command(self.denon_host, self.denon_port, "MVDOWN")
+                self._denon("MVDOWN")
             import time
             time.sleep(0.3)
             # Lire le volume Denon
-            response = send_denon_command(self.denon_host, self.denon_port, "MV?")
+            response = self._denon("MV?")
             if "MV" in response and "ERROR" not in response:
                 for line in response.split('\r'):
                     if line.startswith('MV') and not line.startswith('MVMAX'):
@@ -656,7 +737,7 @@ class PhilipsTVController:
         # Redirection HDMI ARC -> Denon
         if self.denon_host:
             level = max(0, min(98, level))  # Denon range: 0-98
-            response = send_denon_command(self.denon_host, self.denon_port, f"MV{level:02d}")
+            response = self._denon(f"MV{level:02d}")
 
             if "ERROR" in response:
                 return f"Erreur Denon: {response}"
@@ -664,7 +745,7 @@ class PhilipsTVController:
             # Verifier que ca a marche
             import time
             time.sleep(0.3)
-            check = send_denon_command(self.denon_host, self.denon_port, "MV?")
+            check = self._denon("MV?")
             if "MV" in check and "ERROR" not in check:
                 for line in check.split('\r'):
                     if line.startswith('MV') and not line.startswith('MVMAX'):
@@ -712,7 +793,7 @@ class PhilipsTVController:
         """
         # Redirection HDMI ARC -> Denon
         if self.denon_host:
-            response = send_denon_command(self.denon_host, self.denon_port, "MUON")
+            response = self._denon("MUON")
             if "ERROR" not in response:
                 return "Mute Denon toggle"
             return f"Erreur Denon: {response}"
